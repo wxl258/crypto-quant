@@ -58,10 +58,14 @@ jobs:
           STORAGE_DIR="$ROOT_DIR/.buildozer/android/platform/build-arm64-v8a"
           
           echo "ROOT: $ROOT_DIR"
-          echo "P4A: $P4A_DIR"
           echo "SDK: $SDK_DIR"
           echo "NDK: $NDK_DIR"
-          echo "STORAGE: $STORAGE_DIR"
+
+          # 安装 API 33
+          SDK_MGR="$SDK_DIR/tools/bin/sdkmanager"
+          if [ -f "$SDK_MGR" ]; then
+            yes | $SDK_MGR --sdk_root="$SDK_DIR" "platforms;android-33" 2>/dev/null || true
+          fi
 
           # 修复 p4a recipe.py 的相对路径 bug
           RECIPE_PY="$P4A_DIR/pythonforandroid/recipe.py"
@@ -69,9 +73,9 @@ jobs:
             sed -i 's/from os.path import basename, dirname, exists, isdir, isfile, join, realpath, split/from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join, realpath, split/' "$RECIPE_PY"
           fi
 
-          # 禁用 hostpython3 的 fix_ensurepip.patch（不兼容 3.11）
+          # 禁用 hostpython3 的 fix_ensurepip.patch
           HOSTPY_DIR="$P4A_DIR/pythonforandroid/recipes/hostpython3"
-          sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled for py3.11/' "$HOSTPY_DIR/__init__.py" 2>/dev/null || true
+          sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled/' "$HOSTPY_DIR/__init__.py" 2>/dev/null || true
 
           # 直接运行 p4a 编译
           export PYTHONPATH="$P4A_DIR:$PYTHONPATH"
