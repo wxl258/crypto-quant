@@ -40,10 +40,12 @@ jobs:
           # 接受许可证
           mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
           echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
-          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license 2>/dev/null || true
           SDK_MGR=$(find ~/.buildozer -name sdkmanager 2>/dev/null | head -1)
           if [ -n "$SDK_MGR" ]; then
-            yes | $SDK_MGR --sdk_root=$(dirname $(dirname $SDK_MGR)) --licenses 2>/dev/null || true
+            SDK_ROOT=$(dirname $(dirname $SDK_MGR))
+            yes | $SDK_MGR --sdk_root=$SDK_ROOT --licenses 2>/dev/null || true
+            # 安装 API 33（p4a 默认需要）
+            yes | $SDK_MGR --sdk_root=$SDK_ROOT "platforms;android-33" 2>/dev/null || true
           fi
 
       - name: 手动编译（修复 p4a bug 后直接用 p4a）
