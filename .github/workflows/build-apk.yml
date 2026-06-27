@@ -73,8 +73,9 @@ jobs:
             sed -i 's/from os.path import basename, dirname, exists, isdir, isfile, join, realpath, split/from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join, realpath, split/' "$RECIPE_PY"
           fi
 
-          # 禁用 hostpython3 的 fix_ensurepip.patch
+          # 修复 hostpython3 版本匹配（p4a 要求 hostpython3 == python3）
           HOSTPY_DIR="$P4A_DIR/pythonforandroid/recipes/hostpython3"
+          sed -i 's/version = "3.14.2"/version = "3.11.7"/' "$HOSTPY_DIR/__init__.py"
           sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled/' "$HOSTPY_DIR/__init__.py" 2>/dev/null || true
 
           # 直接运行 p4a 编译
