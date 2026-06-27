@@ -33,6 +33,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-android-
 
+      - name: 接受 SDK 许可证
+        run: |
+          yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses 2>/dev/null || true
+          mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
+          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+
       - name: 打包 APK
         run: |
           expect -c '
@@ -42,6 +48,8 @@ jobs:
               "continue" { send "y\r"; exp_continue }
               "already exists" { send "y\r"; exp_continue }
               "Are you sure" { send "y\r"; exp_continue }
+              "Accept?" { send "y\r"; exp_continue }
+              "License" { send "y\r"; exp_continue }
               timeout { puts "TIMEOUT"; exit 1 }
               eof
           }
