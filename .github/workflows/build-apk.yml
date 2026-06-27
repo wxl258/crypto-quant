@@ -3,11 +3,12 @@ name: 打包 APK
 on:
   push:
     branches: [main, master]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
 
     steps:
       - name: 检出代码
@@ -15,10 +16,10 @@ jobs:
 
       - name: 安装系统依赖
         run: |
-          sudo apt update
-          sudo apt install -y git zip unzip openjdk-17-jdk python3-pip \
+          sudo apt update -qq
+          sudo apt install -y -qq git zip unzip openjdk-17-jdk python3-pip \
             autoconf libtool cmake libffi-dev libssl-dev libltdl-dev \
-            python3-dev ccache expect
+            python3-dev ccache patch
 
       - name: 安装 Buildozer
         run: pip3 install --user buildozer cython
@@ -29,31 +30,87 @@ jobs:
           path: |
             ~/.buildozer/android/platform
             .buildozer/android/platform
-          key: ${{ runner.os }}-android-${{ hashFiles('buildozer.spec') }}
+          key: ${{ runner.os }}-android-v2-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            ${{ runner.os }}-android-
+            ${{ runner.os }}-android-v2-
 
-      - name: 接受 SDK 许可证
+      - name: 首次初始化 buildozer（下载 SDK/NDK）
         run: |
-          yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses 2>/dev/null || true
+          yes | buildozer android debug 2>&1 | tail -5 || true
+          # 接受许可证
           mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
           echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license 2>/dev/null || true
+          SDK_MGR=$(find ~/.buildozer -name sdkmanager 2>/dev/null | head -1)
+          if [ -n "$SDK_MGR" ]; then
+            yes | $SDK_MGR --sdk_root=$(dirname $(dirname $SDK_MGR)) --licenses 2>/dev/null || true
+          fi
 
-      - name: 打包 APK
+      - name: 手动编译（修复 p4a bug 后直接用 p4a）
         run: |
-          expect -c '
-          set timeout 7200
-          spawn buildozer android debug
-          expect {
-              "continue" { send "y\r"; exp_continue }
-              "already exists" { send "y\r"; exp_continue }
-              "Are you sure" { send "y\r"; exp_continue }
-              "Accept?" { send "y\r"; exp_continue }
-              "License" { send "y\r"; exp_continue }
-              timeout { puts "TIMEOUT"; exit 1 }
-              eof
-          }
-          '
+          set -e
+          P4A_DIR=$(find .buildozer -name "python-for-android" -type d | head -1)
+          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d | head -1)
+          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d | head -1)
+          
+          echo "P4A: $P4A_DIR"
+          echo "SDK: $SDK_DIR"
+          echo "NDK: $NDK_DIR"
+
+          # 修复 p4a recipe.py 的相对路径 bug
+          RECIPE_PY="$P4A_DIR/pythonforandroid/recipe.py"
+          # 修复 unpack 方法中的路径问题
+          sed -i 's/from os.path import basename, dirname, exists, isdir, isfile, join, realpath, split/from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join, realpath, split/' "$RECIPE_PY"
+          sed -i 's/extraction_filename = join(/extraction_filename = realpath(join(/' "$RECIPE_PY"
+          # 确保 realpath 在 with current_directory 之前调用
+          sed -i '/with current_directory(build_dir):/i\        extraction_filename = realpath(extraction_filename)' "$RECIPE_PY"
+
+          # 禁用 hostpython3 的 fix_ensurepip.patch（不兼容 3.11）
+          HOSTPY_DIR="$P4A_DIR/pythonforandroid/recipes/hostpython3"
+          if grep -q 'fix_ensurepip.patch' "$HOSTPY_DIR/__init__.py"; then
+            sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled for py3.11/' "$HOSTPY_DIR/__init__.py"
+          fi
+
+          # 直接运行 p4a 编译
+          cd crypto_quant
+          PYTHONPATH="$P4A_DIR:$PYTHONPATH" python3 -m pythonforandroid.toolchain create \
+            --dist_name=crypto_quant --bootstrap=sdl2 \
+            --requirements=python3==3.11.7,kivy==2.3.0,fastapi,uvicorn,pandas,numpy,ccxt,websockets,pyyaml,aiofiles,requests,scikit-learn,fpdf2,pydantic,plyer \
+            --arch=arm64-v8a --copy-libs \
+            --storage-dir=../.buildozer/android/platform/build-arm64-v8a \
+            --ndk-api=26 --ignore-setup-py \
+            --sdk-dir="$SDK_DIR" --ndk-dir="$NDK_DIR"
+          cd ..
+
+      - name: 构建最终 APK
+        run: |
+          cd crypto_quant
+          P4A_DIR=$(find ../.buildozer -name "python-for-android" -type d | head -1)
+          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d | head -1)
+          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d | head -1)
+          STORAGE_DIR=../.buildozer/android/platform/build-arm64-v8a
+
+          PYTHONPATH="$P4A_DIR:$PYTHONPATH" python3 -m pythonforandroid.toolchain apk \
+            --bootstrap=sdl2 \
+            --dist_name=crypto_quant \
+            --name="量化交易系统" \
+            --package=com.cryptoquant.app \
+            --version=1.0.0 \
+            --private=. \
+            --permission=INTERNET \
+            --permission=WAKE_LOCK \
+            --permission=FOREGROUND_SERVICE \
+            --arch=arm64-v8a \
+            --storage-dir="$STORAGE_DIR" \
+            --sdk-dir="$SDK_DIR" --ndk-dir="$NDK_DIR" \
+            --ndk-api=26 \
+            --debug
+          cd ..
+
+          # 查找生成的 APK
+          mkdir -p bin
+          find . -name "*.apk" -exec cp {} bin/ \;
+          ls -lh bin/
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
@@ -61,10 +118,3 @@ jobs:
           name: crypto-quant-apk
           path: bin/*.apk
           retention-days: 30
-
-      - name: 创建 Release（仅 tag 推送时）
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: bin/*.apk
-          generate_release_notes: true
