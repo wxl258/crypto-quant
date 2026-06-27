@@ -49,48 +49,51 @@ jobs:
       - name: 手动编译（修复 p4a bug 后直接用 p4a）
         run: |
           set -e
-          P4A_DIR=$(find .buildozer -name "python-for-android" -type d | head -1)
-          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d | head -1)
-          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d | head -1)
+          ROOT_DIR=$(pwd)
+          P4A_DIR="$ROOT_DIR/.buildozer/android/platform/python-for-android"
+          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d 2>/dev/null | head -1)
+          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d 2>/dev/null | head -1)
+          STORAGE_DIR="$ROOT_DIR/.buildozer/android/platform/build-arm64-v8a"
           
+          echo "ROOT: $ROOT_DIR"
           echo "P4A: $P4A_DIR"
           echo "SDK: $SDK_DIR"
           echo "NDK: $NDK_DIR"
+          echo "STORAGE: $STORAGE_DIR"
 
           # 修复 p4a recipe.py 的相对路径 bug
           RECIPE_PY="$P4A_DIR/pythonforandroid/recipe.py"
-          # 修复 unpack 方法中的路径问题
-          sed -i 's/from os.path import basename, dirname, exists, isdir, isfile, join, realpath, split/from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join, realpath, split/' "$RECIPE_PY"
-          sed -i 's/extraction_filename = join(/extraction_filename = realpath(join(/' "$RECIPE_PY"
-          # 确保 realpath 在 with current_directory 之前调用
-          sed -i '/with current_directory(build_dir):/i\        extraction_filename = realpath(extraction_filename)' "$RECIPE_PY"
+          if ! grep -q "abspath" "$RECIPE_PY"; then
+            sed -i 's/from os.path import basename, dirname, exists, isdir, isfile, join, realpath, split/from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join, realpath, split/' "$RECIPE_PY"
+          fi
 
           # 禁用 hostpython3 的 fix_ensurepip.patch（不兼容 3.11）
           HOSTPY_DIR="$P4A_DIR/pythonforandroid/recipes/hostpython3"
-          if grep -q 'fix_ensurepip.patch' "$HOSTPY_DIR/__init__.py"; then
-            sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled for py3.11/' "$HOSTPY_DIR/__init__.py"
-          fi
+          sed -i 's/patches = \["fix_ensurepip.patch"\]/patches = []  # disabled for py3.11/' "$HOSTPY_DIR/__init__.py" 2>/dev/null || true
 
           # 直接运行 p4a 编译
-          cd crypto_quant
-          PYTHONPATH="$P4A_DIR:$PYTHONPATH" python3 -m pythonforandroid.toolchain create \
+          export PYTHONPATH="$P4A_DIR:$PYTHONPATH"
+          cd "$ROOT_DIR/crypto_quant"
+          python3 -m pythonforandroid.toolchain create \
             --dist_name=crypto_quant --bootstrap=sdl2 \
             --requirements=python3==3.11.7,kivy==2.3.0,fastapi,uvicorn,pandas,numpy,ccxt,websockets,pyyaml,aiofiles,requests,scikit-learn,fpdf2,pydantic,plyer \
             --arch=arm64-v8a --copy-libs \
-            --storage-dir=../.buildozer/android/platform/build-arm64-v8a \
+            --storage-dir="$STORAGE_DIR" \
             --ndk-api=26 --ignore-setup-py \
             --sdk-dir="$SDK_DIR" --ndk-dir="$NDK_DIR"
-          cd ..
+          cd "$ROOT_DIR"
 
       - name: 构建最终 APK
         run: |
-          cd crypto_quant
-          P4A_DIR=$(find ../.buildozer -name "python-for-android" -type d | head -1)
-          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d | head -1)
-          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d | head -1)
-          STORAGE_DIR=../.buildozer/android/platform/build-arm64-v8a
-
-          PYTHONPATH="$P4A_DIR:$PYTHONPATH" python3 -m pythonforandroid.toolchain apk \
+          ROOT_DIR=$(pwd)
+          P4A_DIR="$ROOT_DIR/.buildozer/android/platform/python-for-android"
+          SDK_DIR=$(find ~/.buildozer -path "*/android-sdk" -type d 2>/dev/null | head -1)
+          NDK_DIR=$(find ~/.buildozer -path "*/android-ndk*" -type d 2>/dev/null | head -1)
+          STORAGE_DIR="$ROOT_DIR/.buildozer/android/platform/build-arm64-v8a"
+          
+          export PYTHONPATH="$P4A_DIR:$PYTHONPATH"
+          cd "$ROOT_DIR/crypto_quant"
+          python3 -m pythonforandroid.toolchain apk \
             --bootstrap=sdl2 \
             --dist_name=crypto_quant \
             --name="量化交易系统" \
@@ -105,7 +108,7 @@ jobs:
             --sdk-dir="$SDK_DIR" --ndk-dir="$NDK_DIR" \
             --ndk-api=26 \
             --debug
-          cd ..
+          cd "$ROOT_DIR"
 
           # 查找生成的 APK
           mkdir -p bin
