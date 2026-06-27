@@ -13,7 +13,7 @@ source.include_exts = py,png,jpg,kv,atlas,html,css,js,yaml,db,json
 version = 1.0.0
 
 # Python 依赖
-requirements = python3,kivy,fastapi,uvicorn,pandas,numpy,ccxt,websockets,pyyaml,aiofiles,requests,scikit-learn,fpdf2,pydantic,plyer
+requirements = python3==3.11.7,kivy==2.3.0,fastapi,uvicorn,pandas,numpy,ccxt,websockets,pyyaml,aiofiles,requests,scikit-learn,fpdf2,pydantic,plyer
 
 # 屏幕方向
 orientation = portrait
