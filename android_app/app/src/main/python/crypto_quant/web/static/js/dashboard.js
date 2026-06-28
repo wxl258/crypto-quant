@@ -1,369 +1,538 @@
 /**
- * Dashboard - Account overview, K-line chart, positions
+ * Dashboard – Account overview, K-line chart, positions, equity curve,
+ * PnL calendar, day-trade detail, landscape fullscreen.
+ *
+ * Defensive rewrite:
+ *   – All DOM access via safeGet() (defined in app.js)
+ *   – LightweightCharts / Chart.js checked before use
+ *   – Timestamp type-guarded (number vs string)
+ *   – All API calls wrapped in try/catch
+ *   – Null/undefined guards on every dereference
+ *   – Preserves all original global function signatures
  */
 'use strict';
 
-let klineChart = null;
-let candleSeries = null;
-let volumeSeries = null;
-let sma20Series = null;
-let sma50Series = null;
-let _currentSymbol = null;
-let _currentInterval = null;
-let equityChart = null;
+/* ==========================================================================
+ * Chart state (module-private)
+ * ========================================================================== */
 
-async function refreshDashboard() {
-    await Promise.all([
+var klineChart    = null;
+var candleSeries  = null;
+var volumeSeries  = null;
+var sma20Series   = null;
+var sma50Series   = null;
+var _currentSymbol   = null;
+var _currentInterval = null;
+var equityChart      = null;
+
+/* ==========================================================================
+ * Defensive helpers (local)
+ * ========================================================================== */
+
+/** Guard a value: if null/undefined/NaN, return fallback. */
+function _or(v, fallback) {
+    if (v === null || v === undefined || (typeof v === 'number' && isNaN(v))) return fallback;
+    return v;
+}
+
+/** Normalise a timestamp to a number (ms).  Accepts number or ISO string. */
+function _toMs(ts) {
+    if (ts === null || ts === undefined) return 0;
+    if (typeof ts === 'number') return ts;
+    if (typeof ts === 'string') {
+        var d = Date.parse(ts);
+        return isNaN(d) ? 0 : d;
+    }
+    return 0;
+}
+
+/** Normalise a timestamp to a Date object safely. */
+function _toDate(ts) {
+    var ms = _toMs(ts);
+    if (ms <= 0) return new Date();
+    return new Date(ms);
+}
+
+/** Build a calendar date string YYYY-MM-DD from any timestamp. */
+function _toDateStr(ts) {
+    var d = _toDate(ts);
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+}
+
+/* ==========================================================================
+ * Refresh dashboard (entry point)
+ * ========================================================================== */
+
+function refreshDashboard() {
+    return Promise.all([
         loadAccount(),
         loadKlineChart(),
         loadEquityChart(),
     ]);
 }
 
-async function loadAccount() {
-    try {
-        const data = await API.get('/api/account');
-        if (!data) return;
+/* ==========================================================================
+ * Account & positions
+ * ========================================================================== */
 
-        const totalEquityEl = document.getElementById('total-equity');
-        const availableBalanceEl = document.getElementById('available-balance');
-        const positionCountEl = document.getElementById('position-count');
-        const totalTradesEl = document.getElementById('total-trades');
-        const pnlEl = document.getElementById('total-pnl');
+function loadAccount() {
+    return (async function() {
+        try {
+            var data = await API.get('/api/account');
+            if (!data) return;
 
-        if (totalEquityEl) totalEquityEl.textContent = fmtUSD(data.total_equity);
-        if (availableBalanceEl) availableBalanceEl.textContent = fmtUSD(data.capital);
-        if (positionCountEl) positionCountEl.textContent = data.open_positions;
-        if (totalTradesEl) totalTradesEl.textContent = data.total_trades;
+            // Stat cards
+            var totalEquityEl      = safeGet('#total-equity');
+            var availableBalanceEl = safeGet('#available-balance');
+            var positionCountEl    = safeGet('#position-count');
+            var totalTradesEl      = safeGet('#total-trades');
+            var pnlEl              = safeGet('#total-pnl');
 
-        if (pnlEl) {
-            const pnl = data.total_pnl;
-            const pnlPct = data.total_pnl_pct;
-            pnlEl.textContent = `${fmtUSD(pnl)} (${fmtPct(pnlPct)})`;
-            pnlEl.className = `stat-change ${(pnl || 0) >= 0 ? 'positive' : 'negative'}`;
-        }
+            if (totalEquityEl)      totalEquityEl.textContent      = fmtUSD(data.total_equity);
+            if (availableBalanceEl) availableBalanceEl.textContent = fmtUSD(data.capital);
+            if (positionCountEl)    positionCountEl.textContent    = _or(data.open_positions, 0);
+            if (totalTradesEl)      totalTradesEl.textContent      = _or(data.total_trades, 0);
 
-        // Positions table
-        const tbody = document.querySelector('#positions-table tbody');
-        if (!tbody) return;
+            if (pnlEl) {
+                var pnl    = _or(data.total_pnl, 0);
+                var pnlPct = _or(data.total_pnl_pct, 0);
+                pnlEl.textContent = fmtUSD(pnl) + ' (' + fmtPct(pnlPct) + ')';
+                pnlEl.className   = 'stat-change ' + (pnl >= 0 ? 'positive' : 'negative');
+            }
 
-        if (!data.positions || data.positions.length === 0) {
+            // Positions table
+            var tbody = safeGet('#positions-table tbody');
+            if (!tbody) return;
+
+            var positions = Array.isArray(data.positions) ? data.positions : [];
+
+            if (positions.length === 0) {
+                tbody.textContent = '';
+                var emptyRow = document.createElement('tr');
+                emptyRow.className = 'empty-row';
+                var emptyTd = document.createElement('td');
+                emptyTd.colSpan = 8;
+                emptyTd.textContent = '\u6682\u65e0\u6301\u4ed3'; // 暂无持仓
+                emptyRow.appendChild(emptyTd);
+                tbody.appendChild(emptyRow);
+                return;
+            }
+
             tbody.textContent = '';
-            const emptyRow = document.createElement('tr');
-            emptyRow.className = 'empty-row';
-            const emptyTd = document.createElement('td');
-            emptyTd.colSpan = 8;
-            emptyTd.textContent = '暂无持仓';
-            emptyRow.appendChild(emptyTd);
-            tbody.appendChild(emptyRow);
-            return;
+
+            for (var i = 0; i < positions.length; i++) {
+                var p = positions[i];
+                if (!p) continue;
+                var upnl = _or(p.unrealized_pnl, 0);
+                var cls  = upnl >= 0 ? 'positive' : 'negative';
+                var sideLabel = p.side === 'LONG' ? '\u505a\u591a' : '\u505a\u7a7a'; // 做多/做空
+
+                var tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td><strong>' + escHtml(p.symbol) + '</strong></td>' +
+                    '<td><span class="' + (p.side === 'LONG' ? 'positive' : 'negative') + '">' + sideLabel + '</span></td>' +
+                    '<td>' + fmtUSD(p.entry_price) + '</td>' +
+                    '<td>' + fmtUSD(p.current_price) + '</td>' +
+                    '<td>' + ((typeof p.quantity === 'number') ? p.quantity.toFixed(4) : '--') + '</td>' +
+                    '<td>' + (_or(p.leverage, 3)) + 'x</td>' +
+                    '<td class="' + cls + '">' + fmtUSD(upnl) + '</td>' +
+                    '<td></td>';
+
+                var btn = document.createElement('button');
+                btn.className = 'btn-sm-card danger';
+                btn.textContent = '\u5e73\u4ed3'; // 平仓
+                btn.addEventListener('click', (function(sym) {
+                    return function() { closePosition(sym); };
+                })(p.symbol));
+
+                var lastTd = tr.querySelector('td:last-child');
+                if (lastTd) lastTd.appendChild(btn);
+                tbody.appendChild(tr);
+            }
+        } catch (e) {
+            console.error('Failed to load account:', e);
         }
-
-        tbody.textContent = '';
-        data.positions.forEach(p => {
-            const upnl = p.unrealized_pnl || 0;
-            const cls = upnl >= 0 ? 'positive' : 'negative';
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><strong>${escHtml(p.symbol)}</strong></td>
-                <td><span class="${p.side === 'LONG' ? 'positive' : 'negative'}">${p.side === 'LONG' ? '做多' : '做空'}</span></td>
-                <td>${fmtUSD(p.entry_price)}</td>
-                <td>${fmtUSD(p.current_price)}</td>
-                <td>${p.quantity?.toFixed(4) || '--'}</td>
-                <td>${p.leverage || 3}x</td>
-                <td class="${cls}">${fmtUSD(upnl)}</td>
-                <td></td>`;
-            const btn = document.createElement('button');
-            btn.className = 'btn-sm-card danger';
-            btn.textContent = '平仓';
-            btn.addEventListener('click', () => closePosition(p.symbol));
-            const lastTd = tr.querySelector('td:last-child');
-            if (lastTd) lastTd.appendChild(btn);
-            tbody.appendChild(tr);
-        });
-    } catch (e) {
-        console.error('Failed to load account:', e);
-    }
+    })();
 }
 
-async function closePosition(symbol) {
-    if (!confirm(`确认平仓 ${symbol}？`)) return;
-    try {
-        await API.post('/api/trade/close', { symbol });
-        await loadAccount();
-    } catch (e) {
-        showToast('平仓失败: ' + friendlyError(e.message), 'error');
-    }
+function closePosition(symbol) {
+    if (!symbol) return;
+    if (!confirm('\u786e\u8ba4\u5e73\u4ed3 ' + symbol + '\uff1f')) return; // 确认平仓?
+
+    (async function() {
+        try {
+            await API.post('/api/trade/close', { symbol: symbol });
+            loadAccount();
+        } catch (e) {
+            if (typeof showToast === 'function') {
+                showToast('\u5e73\u4ed3\u5931\u8d25: ' + friendlyError(e.message), 'error');
+            }
+        }
+    })();
 }
 
-// K-line Chart
-let _klineDebounceTimer = null;
-let _lastKlineSymbol = null;
-let _lastKlineInterval = null;
+/* ==========================================================================
+ * K-line Chart (LightweightCharts)
+ * ========================================================================== */
 
-async function loadKlineChart() {
-    const symbol = document.getElementById('dashboard-symbol')?.value || 'BTCUSDT';
-    const interval = document.querySelector('.chart-controls .btn-sm.active')?.dataset?.interval || '1h';
+var _klineDebounceTimer = null;
+var _lastKlineSymbol    = null;
+var _lastKlineInterval  = null;
 
-    // Debounce: skip if same symbol+interval requested within 200ms
-    const key = `${symbol}:${interval}`;
+function loadKlineChart() {
+    var symbolEl   = safeGet('#dashboard-symbol');
+    var symbol     = (symbolEl && symbolEl.value) ? symbolEl.value : 'BTCUSDT';
+
+    var activeBtn  = safeGet('.chart-controls .btn-sm.active');
+    var interval   = (activeBtn && activeBtn.dataset) ? (activeBtn.dataset.interval || '1h') : '1h';
+
+    // Debounce guard
+    var key = symbol + ':' + interval;
     if (key === _lastKlineSymbol + ':' + _lastKlineInterval && _klineDebounceTimer) {
-        return;
+        return Promise.resolve();
     }
 
-    _lastKlineSymbol = symbol;
+    _lastKlineSymbol   = symbol;
     _lastKlineInterval = interval;
 
     if (_klineDebounceTimer) clearTimeout(_klineDebounceTimer);
 
-    return new Promise((resolve) => {
-        _klineDebounceTimer = setTimeout(async () => {
+    return new Promise(function(resolve) {
+        _klineDebounceTimer = setTimeout(function() {
             _klineDebounceTimer = null;
-            try {
-                await _loadKlineChartInner(symbol, interval);
-            } finally {
-                resolve();
-            }
+            _loadKlineChartInner(symbol, interval).then(resolve).catch(function() {
+                resolve(); // never reject the caller
+            });
         }, 200);
     });
 }
 
-async function _loadKlineChartInner(symbol, interval) {
-    try {
-        const data = await API.get(`/api/market/klines?symbol=${symbol}&interval=${interval}&limit=200`);
-        if (!data || data.length === 0) return;
+function _loadKlineChartInner(symbol, interval) {
+    return (async function() {
+        try {
+            var data = await API.get('/api/market/klines?symbol=' + encodeURIComponent(symbol) + '&interval=' + encodeURIComponent(interval) + '&limit=200');
+            if (!Array.isArray(data) || data.length === 0) return;
 
-        const container = document.getElementById('kline-chart');
-        if (!container) return;
-        const symbolOrIntervalChanged = (symbol !== _currentSymbol || interval !== _currentInterval);
+            // Guard: LightweightCharts must exist
+            if (typeof LightweightCharts === 'undefined') {
+                console.warn('LightweightCharts not available');
+                return;
+            }
 
-        // If chart exists and symbol/interval unchanged, just update data
-        if (klineChart && !symbolOrIntervalChanged) {
-            const candleData = data.map(d => ({
-                time: d.timestamp / 1000,
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-            }));
-            const volumeData = data.map(d => ({
-                time: d.timestamp / 1000,
-                value: d.volume,
-                color: d.close >= d.open ? 'rgba(76,175,132,0.4)' : 'rgba(239,83,80,0.4)',
-            }));
+            var container = safeGet('#kline-chart');
+            if (!container) return;
 
-            if (candleSeries) candleSeries.setData(candleData);
-            if (volumeSeries) volumeSeries.setData(volumeData);
+            var symbolOrIntervalChanged = (symbol !== _currentSymbol || interval !== _currentInterval);
 
-            // Update SMA lines
-            const closePrices = data.map(d => d.close);
-            const sma20 = calcSMA(closePrices, 20);
-            const sma50 = calcSMA(closePrices, 50);
-            if (sma20Series) sma20Series.setData(data.map((d, i) => ({ time: d.timestamp / 1000, value: sma20[i] })).filter(d => d.value));
-            if (sma50Series) sma50Series.setData(data.map((d, i) => ({ time: d.timestamp / 1000, value: sma50[i] })).filter(d => d.value));
-            return;
+            // ---- Same symbol/interval → just update data ----
+            if (klineChart && !symbolOrIntervalChanged) {
+                var candleData2 = [];
+                var volumeData2 = [];
+                var closePrices2 = [];
+                for (var i2 = 0; i2 < data.length; i2++) {
+                    var d2 = data[i2];
+                    if (!d2) continue;
+                    var time2 = Math.floor(_toMs(d2.timestamp) / 1000);
+                    if (time2 <= 0) continue;
+                    candleData2.push({
+                        time: time2,
+                        open: _or(d2.open, 0),
+                        high: _or(d2.high, 0),
+                        low:  _or(d2.low, 0),
+                        close: _or(d2.close, 0),
+                    });
+                    volumeData2.push({
+                        time: time2,
+                        value: _or(d2.volume, 0),
+                        color: (_or(d2.close, 0) >= _or(d2.open, 0)) ? 'rgba(76,175,132,0.4)' : 'rgba(239,83,80,0.4)',
+                    });
+                    closePrices2.push(_or(d2.close, 0));
+                }
+                if (candleSeries && candleData2.length) candleSeries.setData(candleData2);
+                if (volumeSeries && volumeData2.length) volumeSeries.setData(volumeData2);
+
+                var sma20_2 = calcSMA(closePrices2, 20);
+                var sma50_2 = calcSMA(closePrices2, 50);
+                if (sma20Series && candleData2.length) {
+                    var s20 = [];
+                    for (var j2 = 0; j2 < candleData2.length; j2++) {
+                        if (sma20_2[j2] !== null && sma20_2[j2] !== undefined) {
+                            s20.push({ time: candleData2[j2].time, value: sma20_2[j2] });
+                        }
+                    }
+                    sma20Series.setData(s20);
+                }
+                if (sma50Series && candleData2.length) {
+                    var s50 = [];
+                    for (var k2 = 0; k2 < candleData2.length; k2++) {
+                        if (sma50_2[k2] !== null && sma50_2[k2] !== undefined) {
+                            s50.push({ time: candleData2[k2].time, value: sma50_2[k2] });
+                        }
+                    }
+                    sma50Series.setData(s50);
+                }
+                return;
+            }
+
+            // ---- Symbol/interval changed or first load → recreate chart ----
+            if (klineChart) {
+                try { klineChart.remove(); } catch (_) { /* ignore */ }
+                klineChart   = null;
+                candleSeries = null;
+                volumeSeries = null;
+                sma20Series  = null;
+                sma50Series  = null;
+            }
+
+            _currentSymbol   = symbol;
+            _currentInterval = interval;
+
+            klineChart = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { color: 'transparent' },
+                    textColor: '#94a3b8',
+                    fontSize: 12,
+                },
+                grid: {
+                    vertLines: { color: 'rgba(35, 38, 53, 0.5)' },
+                    horzLines: { color: 'rgba(35, 38, 53, 0.5)' },
+                },
+                crosshair: {
+                    mode: 1,
+                    vertLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
+                    horzLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
+                },
+                rightPriceScale: { borderColor: '#232635' },
+                timeScale: {
+                    borderColor: '#232635',
+                    timeVisible: true,
+                    borderVisible: true,
+                },
+                width: Math.max(1, container.clientWidth || 800),
+                height: Math.max(260, container.clientHeight || 400),
+                handleScroll: { vertTouchDrag: false },
+            });
+
+            candleSeries = klineChart.addCandlestickSeries({
+                upColor: '#22c55e',
+                downColor: '#ef4444',
+                borderUpColor: '#22c55e',
+                borderDownColor: '#ef4444',
+                wickUpColor: '#22c55e',
+                wickDownColor: '#ef4444',
+            });
+
+            volumeSeries = klineChart.addHistogramSeries({
+                color: 'rgba(59, 130, 246, 0.3)',
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+            });
+            klineChart.priceScale('').applyOptions({
+                scaleMargins: { top: 0.8, bottom: 0 },
+            });
+
+            var candleData = [];
+            var volumeData = [];
+            var closePrices = [];
+            for (var i = 0; i < data.length; i++) {
+                var d = data[i];
+                if (!d) continue;
+                var time = Math.floor(_toMs(d.timestamp) / 1000);
+                if (time <= 0) continue;
+                candleData.push({
+                    time: time,
+                    open: _or(d.open, 0),
+                    high: _or(d.high, 0),
+                    low:  _or(d.low, 0),
+                    close: _or(d.close, 0),
+                });
+                volumeData.push({
+                    time: time,
+                    value: _or(d.volume, 0),
+                    color: (_or(d.close, 0) >= _or(d.open, 0)) ? 'rgba(76,175,132,0.4)' : 'rgba(239,83,80,0.4)',
+                });
+                closePrices.push(_or(d.close, 0));
+            }
+
+            if (candleData.length) candleSeries.setData(candleData);
+            if (volumeData.length) volumeSeries.setData(volumeData);
+
+            // SMA overlays
+            var sma20 = calcSMA(closePrices, 20);
+            var sma50 = calcSMA(closePrices, 50);
+
+            sma20Series = klineChart.addLineSeries({ color: '#ffa726', lineWidth: 1 });
+            sma50Series = klineChart.addLineSeries({ color: '#7c4dff', lineWidth: 1 });
+
+            var sma20Data = [];
+            var sma50Data = [];
+            for (var j = 0; j < candleData.length; j++) {
+                if (sma20[j] !== null && sma20[j] !== undefined) {
+                    sma20Data.push({ time: candleData[j].time, value: sma20[j] });
+                }
+                if (sma50[j] !== null && sma50[j] !== undefined) {
+                    sma50Data.push({ time: candleData[j].time, value: sma50[j] });
+                }
+            }
+            if (sma20Data.length) sma20Series.setData(sma20Data);
+            if (sma50Data.length) sma50Series.setData(sma50Data);
+
+            _ensureResizeHandler();
+        } catch (e) {
+            console.error('Failed to load kline:', e);
         }
-
-        // Destroy and recreate on symbol/interval change or first load
-        if (klineChart) {
-            klineChart.remove();
-            klineChart = null;
-        }
-
-        _currentSymbol = symbol;
-        _currentInterval = interval;
-
-        klineChart = LightweightCharts.createChart(container, {
-            layout: {
-                background: { color: 'transparent' },
-                textColor: '#94a3b8',
-                fontSize: 12,
-            },
-            grid: {
-                vertLines: { color: 'rgba(35, 38, 53, 0.5)' },
-                horzLines: { color: 'rgba(35, 38, 53, 0.5)' },
-            },
-            crosshair: {
-                mode: 1,
-                vertLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
-                horzLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
-            },
-            rightPriceScale: { borderColor: '#232635' },
-            timeScale: {
-                borderColor: '#232635',
-                timeVisible: true,
-                borderVisible: true,
-            },
-            width: container.clientWidth,
-            height: Math.max(260, container.clientHeight || 400),
-            handleScroll: { vertTouchDrag: false },
-        });
-
-        candleSeries = klineChart.addCandlestickSeries({
-            upColor: '#22c55e',
-            downColor: '#ef4444',
-            borderUpColor: '#22c55e',
-            borderDownColor: '#ef4444',
-            wickUpColor: '#22c55e',
-            wickDownColor: '#ef4444',
-        });
-
-        volumeSeries = klineChart.addHistogramSeries({
-            color: 'rgba(59, 130, 246, 0.3)',
-            priceFormat: { type: 'volume' },
-            priceScaleId: '',
-        });
-        klineChart.priceScale('').applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 },
-        });
-
-        const candleData = data.map(d => ({
-            time: d.timestamp / 1000,
-            open: d.open,
-            high: d.high,
-            low: d.low,
-            close: d.close,
-        }));
-
-        const volumeData = data.map(d => ({
-            time: d.timestamp / 1000,
-            value: d.volume,
-            color: d.close >= d.open ? 'rgba(76,175,132,0.4)' : 'rgba(239,83,80,0.4)',
-        }));
-
-        candleSeries.setData(candleData);
-        volumeSeries.setData(volumeData);
-
-        // SMA lines
-        const closePrices = data.map(d => d.close);
-        const sma20 = calcSMA(closePrices, 20);
-        const sma50 = calcSMA(closePrices, 50);
-
-        sma20Series = klineChart.addLineSeries({
-            color: '#ffa726',
-            lineWidth: 1,
-        });
-        sma50Series = klineChart.addLineSeries({
-            color: '#7c4dff',
-            lineWidth: 1,
-        });
-
-        sma20Series.setData(data.map((d, i) => ({ time: d.timestamp / 1000, value: sma20[i] })).filter(d => d.value !== null));
-        sma50Series.setData(data.map((d, i) => ({ time: d.timestamp / 1000, value: sma50[i] })).filter(d => d.value !== null));
-    } catch (e) {
-        console.error('Failed to load kline:', e);
-    }
+    })();
 }
 
-// Register resize handler once, not on every chart refresh
-let _resizeRegistered = false;
+/* ==========================================================================
+ * Resize handler (registered once)
+ * ========================================================================== */
+
+var _resizeRegistered = false;
+
 function _ensureResizeHandler() {
     if (_resizeRegistered) return;
     _resizeRegistered = true;
-    window.addEventListener('resize', () => {
-        const container = document.getElementById('kline-chart');
-        if (klineChart && container) {
+
+    window.addEventListener('resize', function() {
+        var container = safeGet('#kline-chart');
+        if (!klineChart || !container) return;
+        try {
             klineChart.applyOptions({ width: container.clientWidth });
-        }
+        } catch (_) { /* ignore */ }
     });
 }
-// Call once on first chart load
-const _origLoadKline = loadKlineChart;
-loadKlineChart = async function() {
-    _ensureResizeHandler();
-    return _origLoadKline();
-};
+
+/* ==========================================================================
+ * SMA calculation
+ * ========================================================================== */
 
 function calcSMA(data, period) {
-    const result = new Array(data.length).fill(null);
-    for (let i = period - 1; i < data.length; i++) {
-        let sum = 0;
-        for (let j = 0; j < period; j++) sum += data[i - j];
-        result[i] = sum / period;
+    if (!Array.isArray(data)) return [];
+    var result = new Array(data.length);
+    for (var i = 0; i < data.length; i++) result[i] = null;
+
+    for (var i2 = period - 1; i2 < data.length; i2++) {
+        var sum = 0;
+        for (var j = 0; j < period; j++) {
+            sum += _or(data[i2 - j], 0);
+        }
+        result[i2] = sum / period;
     }
     return result;
 }
 
-// Equity Curve Chart — loads real equity data from account history
-async function loadEquityChart() {
-    try {
-        const account = await API.get('/api/account');
-        if (!account) return;
-        const history = await API.get('/api/trade/history?limit=200');
+/* ==========================================================================
+ * Equity Curve Chart (Chart.js)
+ * ========================================================================== */
 
-        const canvas = document.getElementById('equity-chart');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        if (equityChart) equityChart.destroy();
+function loadEquityChart() {
+    return (async function() {
+        try {
+            var account = await API.get('/api/account');
+            if (!account) return;
 
-        const points = buildEquityCurve(account, (history && history.trades) || []);
-        const labels = points.map(p => p.label);
-        const values = points.map(p => p.equity);
+            var history = await API.get('/api/trade/history?limit=200');
+            var trades = (history && Array.isArray(history.trades)) ? history.trades : [];
 
-        equityChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: '权益',
-                    data: values,
-                    borderColor: '#4fc3f7',
-                    backgroundColor: 'rgba(79,195,247,0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                }],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    x: { display: false },
-                    y: {
-                        ticks: { color: '#8b8fa8', callback: v => '$' + v.toLocaleString() },
-                        grid: { color: 'rgba(46,49,80,0.3)' },
+            // Guard: Chart must exist
+            if (typeof Chart === 'undefined') {
+                console.warn('Chart.js not available');
+                return;
+            }
+
+            var canvas = safeGet('#equity-chart');
+            if (!canvas) return;
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            if (equityChart) {
+                try { equityChart.destroy(); } catch (_) { /* ignore */ }
+                equityChart = null;
+            }
+
+            var points = buildEquityCurve(account, trades);
+            var labels = [];
+            var values = [];
+            for (var i = 0; i < points.length; i++) {
+                labels.push(_or(points[i].label, ''));
+                values.push(_or(points[i].equity, 0));
+            }
+
+            equityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '\u6743\u76ca', // 权益
+                        data: values,
+                        borderColor: '#4fc3f7',
+                        backgroundColor: 'rgba(79,195,247,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { display: false },
+                        y: {
+                            ticks: { color: '#8b8fa8', callback: function(v) { return '$' + v.toLocaleString(); } },
+                            grid: { color: 'rgba(46,49,80,0.3)' },
+                        },
                     },
                 },
-            },
-        });
-    } catch (e) {
-        console.error('Failed to load equity chart:', e);
-    }
+            });
+        } catch (e) {
+            console.error('Failed to load equity chart:', e);
+        }
+    })();
 }
 
 function buildEquityCurve(account, trades) {
-    const initialCapital = account.initial_capital || 10000;
-    const points = [];
-    let equity = initialCapital;
+    if (!account) return [{ label: '', equity: 0 }];
+
+    var initialCapital = _or(account.initial_capital, 10000);
+    var points = [];
+    var equity = initialCapital;
 
     // Sort trades chronologically (oldest first)
-    const sorted = [...trades].sort((a, b) =>
-        new Date(a.timestamp) - new Date(b.timestamp)
-    );
+    var sorted = Array.isArray(trades) ? trades.slice() : [];
+    sorted.sort(function(a, b) {
+        var aMs = _toMs((a && a.timestamp) ? a.timestamp : 0);
+        var bMs = _toMs((b && b.timestamp) ? b.timestamp : 0);
+        return aMs - bMs;
+    });
 
     // Start point
     if (sorted.length > 0) {
         points.push({
-            label: new Date(sorted[0].timestamp).toLocaleDateString(),
+            label: _toDate(sorted[0].timestamp).toLocaleDateString(),
             equity: initialCapital,
         });
     }
 
-    for (const t of sorted) {
+    for (var i = 0; i < sorted.length; i++) {
+        var t = sorted[i];
+        if (!t) continue;
         if (t.side === 'CLOSE') {
-            equity += (t.pnl || 0);
+            equity += _or(t.pnl, 0);
             points.push({
-                label: new Date(t.timestamp).toLocaleDateString(),
+                label: _toDate(t.timestamp).toLocaleDateString(),
                 equity: Math.round(equity * 100) / 100,
             });
         }
     }
 
     // Current equity as final point
-    const currentEquity = account.total_equity || equity;
+    var currentEquity = _or(account.total_equity, equity);
     if (points.length === 0 || points[points.length - 1].equity !== currentEquity) {
         points.push({
             label: new Date().toLocaleDateString(),
@@ -371,7 +540,7 @@ function buildEquityCurve(account, trades) {
         });
     }
 
-    // Ensure at least 2 points for a line
+    // Ensure at least 2 points
     if (points.length < 2) {
         points.unshift({ label: '', equity: initialCapital });
     }
@@ -379,105 +548,132 @@ function buildEquityCurve(account, trades) {
     return points;
 }
 
-// Interval buttons
-document.querySelectorAll('.chart-controls .btn-sm').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.chart-controls .btn-sm').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        loadKlineChart();
-    });
-});
+/* ==========================================================================
+ * Interval buttons (delegated)
+ * ========================================================================== */
+
+(function() {
+    var buttons = document.querySelectorAll('.chart-controls .btn-sm');
+    if (!buttons) return;
+    for (var i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener('click', function() {
+            var all = document.querySelectorAll('.chart-controls .btn-sm');
+            for (var j = 0; j < all.length; j++) {
+                all[j].classList.remove('active');
+            }
+            this.classList.add('active');
+            loadKlineChart();
+        });
+    }
+})();
 
 // Symbol selector
-document.getElementById('dashboard-symbol')?.addEventListener('change', () => {
-    loadKlineChart();
-});
-
-// ── PnL Calendar ──
-let _calendarYear = new Date().getFullYear();
-let _calendarMonth = new Date().getMonth(); // 0-based
-
-async function loadPnLCalendar() {
-    try {
-        const data = await API.get('/api/trade/history?limit=500');
-        const trades = data.trades || [];
-
-        // Aggregate PnL by date
-        const dailyPnl = {};
-        const dailyTrades = {};
-        for (const t of trades) {
-            const d = t.timestamp ? t.timestamp.split('T')[0] : null;
-            if (!d) continue;
-            dailyPnl[d] = (dailyPnl[d] || 0) + (t.pnl || 0);
-            if (!dailyTrades[d]) dailyTrades[d] = [];
-            dailyTrades[d].push(t);
-        }
-
-        renderCalendar(dailyPnl, dailyTrades);
-    } catch (e) {
-        console.error('Failed to load PnL calendar:', e);
+(function() {
+    var sel = safeGet('#dashboard-symbol');
+    if (sel) {
+        sel.addEventListener('change', function() { loadKlineChart(); });
     }
+})();
+
+/* ==========================================================================
+ * PnL Calendar
+ * ========================================================================== */
+
+var _calendarYear  = new Date().getFullYear();
+var _calendarMonth = new Date().getMonth(); // 0-based
+
+function loadPnLCalendar() {
+    return (async function() {
+        try {
+            var data = await API.get('/api/trade/history?limit=500');
+            var trades = (data && Array.isArray(data.trades)) ? data.trades : [];
+
+            // Aggregate PnL by date
+            var dailyPnl = {};
+            var dailyTrades = {};
+            for (var i = 0; i < trades.length; i++) {
+                var t = trades[i];
+                if (!t) continue;
+                var d = _toDateStr(t.timestamp);
+                if (!d) continue;
+                dailyPnl[d] = (_or(dailyPnl[d], 0)) + _or(t.pnl, 0);
+                if (!dailyTrades[d]) dailyTrades[d] = [];
+                dailyTrades[d].push(t);
+            }
+
+            renderCalendar(dailyPnl, dailyTrades);
+        } catch (e) {
+            console.error('Failed to load PnL calendar:', e);
+        }
+    })();
 }
 
 function renderCalendar(dailyPnl, dailyTrades) {
-    const container = document.getElementById('pnl-calendar');
+    var container = safeGet('#pnl-calendar');
     if (!container) return;
 
-    const year = _calendarYear;
-    const month = _calendarMonth;
+    var year  = _calendarYear;
+    var month = _calendarMonth;
 
-    // Update month label
-    document.getElementById('calendar-month-label').textContent =
-        `${year}年${month + 1}月`;
+    // Month label
+    var monthLabel = safeGet('#calendar-month-label');
+    if (monthLabel) {
+        monthLabel.textContent = year + '\u5e74' + (month + 1) + '\u6708'; // 年/月
+    }
 
-    // Find max abs PnL for color scaling
-    const pnlValues = Object.values(dailyPnl).map(Math.abs);
-    const maxAbsPnl = pnlValues.length > 0 ? Math.max(...pnlValues) : 0;
+    // Max abs PnL for color scaling
+    var maxAbsPnl = 0;
+    var pnlKeys = Object.keys(dailyPnl);
+    for (var ki = 0; ki < pnlKeys.length; ki++) {
+        var absV = Math.abs(dailyPnl[pnlKeys[ki]] || 0);
+        if (absV > maxAbsPnl) maxAbsPnl = absV;
+    }
 
     // Weekday headers
-    const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
-    let html = weekdays.map(d => `<div class="calendar-weekday">${d}</div>`).join('');
+    var weekdays = ['\u65e5', '\u4e00', '\u4e8c', '\u4e09', '\u56db', '\u4e94', '\u516d']; // 日一二三四五六
+    var html = '';
+    for (var w = 0; w < weekdays.length; w++) {
+        html += '<div class="calendar-weekday">' + weekdays[w] + '</div>';
+    }
 
     // First day of month
-    const firstDay = new Date(year, month, 1).getDay(); // 0=Sunday
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    var firstDay   = new Date(year, month, 1).getDay();
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
 
-    // Today
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    var todayStr = _toDateStr(new Date().toISOString());
 
-    // Fill empty cells before first day
-    for (let i = 0; i < firstDay; i++) {
+    // Empty cells before first day
+    for (var e = 0; e < firstDay; e++) {
         html += '<div class="calendar-cell no-trade"></div>';
     }
 
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const pnl = dailyPnl[dateStr];
-        const trades = dailyTrades[dateStr] || [];
-        const isToday = dateStr === todayStr;
+    for (var day = 1; day <= daysInMonth; day++) {
+        var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        var pnl   = dailyPnl[dateStr];
+        var trades = dailyTrades[dateStr] || [];
+        var isToday = dateStr === todayStr;
 
-        let cls = 'calendar-cell';
-        let pnlText = '';
+        var cls = 'calendar-cell';
+        var pnlText = '';
 
         if (pnl === undefined || pnl === null) {
             cls += ' no-trade';
         } else if (Math.abs(pnl) < 0.001) {
             cls += ' neutral';
         } else if (pnl > 0) {
-            cls += maxAbsPnl > 0 && pnl / maxAbsPnl > 0.5 ? ' profit-high' : ' profit';
-            pnlText = `+${pnl.toFixed(0)}`;
+            cls += (maxAbsPnl > 0 && pnl / maxAbsPnl > 0.5) ? ' profit-high' : ' profit';
+            pnlText = '+' + pnl.toFixed(0);
         } else {
-            cls += maxAbsPnl > 0 && Math.abs(pnl) / maxAbsPnl > 0.5 ? ' loss-high' : ' loss';
+            cls += (maxAbsPnl > 0 && Math.abs(pnl) / maxAbsPnl > 0.5) ? ' loss-high' : ' loss';
             pnlText = pnl.toFixed(0);
         }
 
         if (isToday) cls += ' today';
 
-        html += `<div class="${cls}" onclick="showDayTrades('${dateStr}')" title="${dateStr}: ${pnlText || '无交易'} (${trades.length}笔)">
-            <span class="day-num">${day}</span>
-            ${pnlText ? `<span class="day-pnl">${pnlText}</span>` : ''}
-        </div>`;
+        html += '<div class="' + cls + '" onclick="showDayTrades(\'' + dateStr + '\')" title="' + dateStr + ': ' + (pnlText || '\u65e0\u4ea4\u6613') + ' (' + trades.length + '\u7b14)">' +
+            '<span class="day-num">' + day + '</span>' +
+            (pnlText ? '<span class="day-pnl">' + pnlText + '</span>' : '') +
+        '</div>';
     }
 
     container.innerHTML = html;
@@ -495,51 +691,71 @@ function changeCalendarMonth(delta) {
     loadPnLCalendar();
 }
 
+/* ==========================================================================
+ * Day trade detail (bottom-sheet modal)
+ * ========================================================================== */
+
 function showDayTrades(dateStr) {
-    // Fetch trades for that day and show in a modal
-    (async () => {
+    if (!dateStr) return;
+
+    (async function() {
         try {
-            const data = await API.get('/api/trade/history?limit=500');
-            const dayTrades = (data.trades || []).filter(t =>
-                t.timestamp && t.timestamp.startsWith(dateStr)
-            );
+            var data = await API.get('/api/trade/history?limit=500');
+            var allTrades = (data && Array.isArray(data.trades)) ? data.trades : [];
 
-            const totalPnl = dayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-            const pnlCls = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+            // Filter by date
+            var dayTrades = [];
+            for (var i = 0; i < allTrades.length; i++) {
+                var t = allTrades[i];
+                if (!t) continue;
+                var tStr = _toDateStr(t.timestamp);
+                if (tStr === dateStr) dayTrades.push(t);
+            }
 
-            let html = `<div style="padding:16px;">
-                <h3 style="margin-bottom:12px;">📅 ${dateStr} 交易详情</h3>
-                <div style="font-size:16px;font-weight:700;color:${pnlCls};margin-bottom:16px;">
-                    当日总盈亏: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USDT (${dayTrades.length}笔)
-                </div>`;
+            var totalPnl = 0;
+            for (var j = 0; j < dayTrades.length; j++) {
+                totalPnl += _or(dayTrades[j].pnl, 0);
+            }
+
+            var pnlCls = totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+
+            var html = '<div style="padding:16px;">' +
+                '<h3 style="margin-bottom:12px;">\ud83d\udcc5 ' + dateStr + ' \u4ea4\u6613\u8be6\u60c5</h3>' + // 交易详情
+                '<div style="font-size:16px;font-weight:700;color:' + pnlCls + ';margin-bottom:16px;">' +
+                    '\u5f53\u65e5\u603b\u76c8\u4e8f: ' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2) + ' USDT (' + dayTrades.length + '\u7b14)' + // 当日总盈亏 / 笔
+                '</div>';
 
             if (dayTrades.length === 0) {
-                html += '<div style="color:var(--text-muted);text-align:center;padding:20px;">当日无交易</div>';
+                html += '<div style="color:var(--text-muted);text-align:center;padding:20px;">\u5f53\u65e5\u65e0\u4ea4\u6613</div>'; // 当日无交易
             } else {
-                html += '<div class="table-container"><table class="data-table"><thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>盈亏</th></tr></thead><tbody>';
-                for (const t of dayTrades) {
-                    const pnlC = (t.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)';
-                    html += `<tr>
-                        <td>${fmtTime(t.timestamp)}</td>
-                        <td>${escHtml(t.symbol || '--')}</td>
-                        <td>${escHtml(t.side || '--')}</td>
-                        <td style="color:${pnlC};font-weight:600;">${(t.pnl || 0) >= 0 ? '+' : ''}${(t.pnl || 0).toFixed(2)}</td>
-                    </tr>`;
+                html += '<div class="table-container"><table class="data-table"><thead><tr><th>\u65f6\u95f4</th><th>\u4ea4\u6613\u5bf9</th><th>\u65b9\u5411</th><th>\u76c8\u4e8f</th></tr></thead><tbody>';
+                for (var k = 0; k < dayTrades.length; k++) {
+                    var t2 = dayTrades[k];
+                    var pnlC = (_or(t2.pnl, 0)) >= 0 ? 'var(--green)' : 'var(--red)';
+                    html += '<tr>' +
+                        '<td>' + fmtTime(t2.timestamp) + '</td>' +
+                        '<td>' + escHtml(t2.symbol || '--') + '</td>' +
+                        '<td>' + escHtml(t2.side || '--') + '</td>' +
+                        '<td style="color:' + pnlC + ';font-weight:600;">' + ((_or(t2.pnl, 0)) >= 0 ? '+' : '') + (_or(t2.pnl, 0)).toFixed(2) + '</td>' +
+                    '</tr>';
                 }
                 html += '</tbody></table></div>';
             }
-            html += '<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="this.closest(\'.signal-detail-overlay\').remove()">关闭</button></div>';
+            html += '<button class="btn btn-primary btn-block" style="margin-top:12px;" onclick="this.closest(\'.signal-detail-overlay\').remove()">\u5173\u95ed</button></div>'; // 关闭
 
-            // Reuse signal detail overlay pattern
-            const overlay = document.createElement('div');
+            var overlay = document.createElement('div');
             overlay.className = 'signal-detail-overlay';
-            overlay.innerHTML = `<div class="signal-detail-sheet">${html}</div>`;
+            overlay.innerHTML = '<div class="signal-detail-sheet">' + html + '</div>';
             document.body.appendChild(overlay);
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) overlay.remove();
+
+            overlay.addEventListener('click', function(e) {
+                if (e.target === overlay) {
+                    try { overlay.remove(); } catch (_) { /* ignore */ }
+                }
             });
-            requestAnimationFrame(() => {
-                const sheet = overlay.querySelector('.signal-detail-sheet');
+
+            requestAnimationFrame(function() {
+                var sheet = overlay.querySelector('.signal-detail-sheet');
                 if (sheet) sheet.style.transform = 'translateY(0)';
             });
         } catch (e) {
@@ -548,39 +764,40 @@ function showDayTrades(dateStr) {
     })();
 }
 
-// ── Landscape Fullscreen K-line ──
-let _isLandscape = false;
+/* ==========================================================================
+ * Landscape fullscreen K-line
+ * ========================================================================== */
+
+var _isLandscape = false;
 
 function handleLandscapeChange(e) {
-    const dashboard = document.getElementById('page-dashboard');
+    var dashboard = safeGet('#page-dashboard');
     if (!dashboard || !dashboard.classList.contains('active')) return;
 
     if (e.matches) {
-        // Enter landscape mode
         _isLandscape = true;
         enterLandscapeFullscreen();
     } else {
-        // Exit landscape mode
         _isLandscape = false;
         exitLandscapeFullscreen();
     }
 }
 
 function enterLandscapeFullscreen() {
-    const dashboard = document.getElementById('page-dashboard');
+    var dashboard = safeGet('#page-dashboard');
     if (!dashboard) return;
 
     dashboard.classList.add('landscape-fullscreen');
 
     // Add exit button if not exists
-    let exitBtn = document.getElementById('landscape-exit-btn');
+    var exitBtn = safeGet('#landscape-exit-btn');
     if (!exitBtn) {
         exitBtn = document.createElement('button');
         exitBtn.id = 'landscape-exit-btn';
         exitBtn.className = 'landscape-exit-btn';
-        exitBtn.textContent = '✕ 退出全屏';
+        exitBtn.textContent = '\u2715 \u9000\u51fa\u5168\u5c4f'; // 退出全屏
         exitBtn.addEventListener('click', exitLandscapeFullscreen);
-        const klineContainer = dashboard.querySelector('.chart-container.large');
+        var klineContainer = dashboard.querySelector('.chart-container.large');
         if (klineContainer) {
             klineContainer.style.position = 'relative';
             klineContainer.appendChild(exitBtn);
@@ -589,71 +806,78 @@ function enterLandscapeFullscreen() {
 
     // Resize kline chart
     if (klineChart) {
-        const container = document.getElementById('kline-chart');
+        var container = safeGet('#kline-chart');
         if (container) {
-            klineChart.applyOptions({
-                width: window.innerWidth,
-                height: window.innerHeight - 50,
-            });
+            try {
+                klineChart.applyOptions({
+                    width: window.innerWidth,
+                    height: window.innerHeight - 50,
+                });
+            } catch (_) { /* ignore */ }
         }
     }
 }
 
 function exitLandscapeFullscreen() {
-    const dashboard = document.getElementById('page-dashboard');
+    var dashboard = safeGet('#page-dashboard');
     if (!dashboard) return;
 
     dashboard.classList.remove('landscape-fullscreen');
 
     // Remove exit button
-    const exitBtn = document.getElementById('landscape-exit-btn');
-    if (exitBtn) exitBtn.remove();
+    var exitBtn = safeGet('#landscape-exit-btn');
+    if (exitBtn) {
+        try { exitBtn.remove(); } catch (_) { /* ignore */ }
+    }
 
     // Restore kline chart size
     if (klineChart) {
-        const container = document.getElementById('kline-chart');
+        var container = safeGet('#kline-chart');
         if (container) {
-            klineChart.applyOptions({
-                width: container.clientWidth,
-                height: 400,
-            });
+            try {
+                klineChart.applyOptions({
+                    width: container.clientWidth,
+                    height: 400,
+                });
+            } catch (_) { /* ignore */ }
         }
     }
 }
 
 // Listen for orientation changes
-const landscapeQuery = window.matchMedia('(orientation: landscape)');
-landscapeQuery.addEventListener('change', handleLandscapeChange);
+var landscapeQuery = window.matchMedia('(orientation: landscape)');
+if (landscapeQuery && typeof landscapeQuery.addEventListener === 'function') {
+    landscapeQuery.addEventListener('change', handleLandscapeChange);
+}
 
-// Also check on page navigation to dashboard
-const _origRefreshDash = refreshDashboard;
-refreshDashboard = async function() {
-    const result = await _origRefreshDash();
-    // Load calendar after dashboard refresh
+// ── refreshDashboard override: also load calendar & check landscape ──
+var _origRefreshDash = refreshDashboard;
+refreshDashboard = function() {
+    var result = _origRefreshDash();
     loadPnLCalendar();
-    // Check landscape state
-    if (landscapeQuery.matches) {
+    if (landscapeQuery && landscapeQuery.matches) {
         enterLandscapeFullscreen();
     }
     return result;
 };
 
-// Update resize handler to account for landscape mode
-let _landscapeResizeAdded = false;
-const _origEnsureResize = _ensureResizeHandler;
+// ── Extend resize handler for landscape ──
+var _landscapeResizeAdded = false;
+var _origEnsureResize = _ensureResizeHandler;
 _ensureResizeHandler = function() {
     _origEnsureResize();
     if (_landscapeResizeAdded) return;
     _landscapeResizeAdded = true;
-    window.addEventListener('resize', () => {
-        if (_isLandscape && klineChart) {
-            const container = document.getElementById('kline-chart');
-            if (container) {
+    window.addEventListener('resize', function() {
+        if (!_isLandscape || !klineChart) return;
+        var container = safeGet('#kline-chart');
+        if (container) {
+            try {
                 klineChart.applyOptions({
                     width: window.innerWidth,
                     height: window.innerHeight - 50,
                 });
-            }
+            } catch (_) { /* ignore */ }
         }
     });
 };
