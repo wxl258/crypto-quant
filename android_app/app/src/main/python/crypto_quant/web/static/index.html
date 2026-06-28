@@ -67,6 +67,9 @@
             <a href="#" class="nav-item" data-page="recommend">
                 <span class="nav-icon">🧠</span> <span class="nav-label">AI推荐</span>
             </a>
+            <a href="#" class="nav-item" data-page="settings">
+                <span class="nav-icon">⚙️</span> <span class="nav-label">系统设置</span>
+            </a>
         </nav>
         <div class="sidebar-footer">
             <div class="system-status">
@@ -580,6 +583,46 @@
                     <button class="btn" data-action="discoverStrategies" style="background:var(--bg-hover);color:var(--text-primary);">🔍 扫描策略</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Settings Page -->
+        <div class="page" id="page-settings">
+          <div class="page-header"><h2>⚙️ 系统设置</h2></div>
+          <div class="settings-grid">
+            <!-- 交易所配置 -->
+            <div class="panel"><div class="panel-header">🏦 交易所配置</div>
+              <div class="panel-body">
+                <div class="form-group"><label>活跃交易所</label><select id="settings-exchange" onchange="switchExchange(this.value)"><option value="binance">币安 Binance</option><option value="okx">欧易 OKX</option></select></div>
+                <div class="form-group"><label>API Key</label><input type="password" id="settings-apikey" placeholder="输入API Key"></div>
+                <div class="form-group"><label>API Secret</label><input type="password" id="settings-apisecret" placeholder="输入API Secret"></div>
+                <div class="form-group"><label>测试网络</label><select id="settings-testnet"><option value="true">测试网</option><option value="false">实盘</option></select></div>
+                <button class="btn btn-primary" onclick="saveExchangeConfig()" style="width:100%">💾 保存并测试连接</button>
+                <div id="settings-exchange-status" style="margin-top:12px;font-size:13px;"></div>
+              </div>
+            </div>
+            <!-- 风控参数 -->
+            <div class="panel"><div class="panel-header">🛡️ 风控参数</div>
+              <div class="panel-body">
+                <div class="form-group"><label>单币最大仓位 (%)</label><input type="number" id="settings-maxpos" value="30" min="1" max="100"></div>
+                <div class="form-group"><label>总仓位上限 (%)</label><input type="number" id="settings-maxtotal" value="80" min="1" max="100"></div>
+                <div class="form-group"><label>日亏损上限 (%)</label><input type="number" id="settings-maxdaily" value="5" min="0.1" max="50" step="0.1"></div>
+                <div class="form-group"><label>止损比例 (%)</label><input type="number" id="settings-stoploss" value="5" min="0.1" max="50" step="0.1"></div>
+                <div class="form-group"><label>止盈比例 (%)</label><input type="number" id="settings-takeprofit" value="10" min="0.1" max="100" step="0.1"></div>
+                <div class="form-group"><label>最大回撤熔断 (%)</label><input type="number" id="settings-maxdd" value="20" min="5" max="50"></div>
+                <button class="btn btn-primary" onclick="saveRiskConfig()" style="width:100%">💾 保存风控参数</button>
+              </div>
+            </div>
+            <!-- 策略默认参数 -->
+            <div class="panel"><div class="panel-header">📊 策略默认值</div>
+              <div class="panel-body">
+                <div class="form-group"><label>默认交易对</label><select id="settings-symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>DOGEUSDT</option><option>BNBUSDT</option></select></div>
+                <div class="form-group"><label>默认杠杆</label><input type="number" id="settings-leverage" value="3" min="1" max="125"></div>
+                <div class="form-group"><label>初始资金 (USDT)</label><input type="number" id="settings-capital" value="10000" min="100" step="100"></div>
+                <div class="form-group"><label>默认K线周期</label><select id="settings-interval"><option value="5m">5分钟</option><option value="15m">15分钟</option><option value="1h" selected>1小时</option><option value="4h">4小时</option><option value="1d">日线</option></select></div>
+                <button class="btn btn-primary" onclick="saveTradingConfig()" style="width:100%">💾 保存默认参数</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Backup Page -->

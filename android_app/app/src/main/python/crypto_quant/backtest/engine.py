@@ -108,22 +108,26 @@ class BacktestEngine:
                 return 1.0
 
             win_rate = len(wins) / len(recent)
-            avg_win = sum(t['pnl'] for t in wins) / len(wins)
-            avg_loss = abs(sum(t['pnl'] for t in losses) / len(losses))
+            # Use log-return based averages instead of absolute PnL
+            avg_win = sum(t['pnl_pct'] / 100.0 for t in wins) / len(wins) if wins else 0
+            avg_loss = abs(sum(t['pnl_pct'] / 100.0 for t in losses) / len(losses)) if losses else 0
 
             if avg_loss == 0:
                 return 1.0
 
             # Kelly formula: f = win_rate - (1 - win_rate) / (avg_win / avg_loss)
             win_loss_ratio = avg_win / avg_loss
-            if win_loss_ratio == 0:
+            if win_loss_ratio <= 0:
                 return 0.0
 
             kelly_f = win_rate - (1 - win_rate) / win_loss_ratio
 
+            # Half-Kelly: use 50% of Kelly for safety
+            half_kelly = kelly_f * 0.5
+
             # Cap at 0.25, floor at 0
-            kelly_f = max(0.0, min(kelly_f, 0.25))
-            return kelly_f
+            result = max(0.0, min(half_kelly, 0.25))
+            return result
 
         if self.position_sizing == "anti_martingale":
             if not closed:
@@ -593,4 +597,44 @@ class BacktestEngine:
             result = self.run(strategy, data, symbol)
             result['params'] = params
             results.append(result)
+        return results
+
+    def walk_forward_analysis(self, strategy_class, df, param_grid, train_ratio=0.6, step_size=30):
+        """Walk-Forward Analysis: 滚动窗口训练/测试"""
+        results = []
+        n = len(df)
+        train_end = int(n * train_ratio)
+
+        while train_end + step_size <= n:
+            train_df = df.iloc[:train_end]
+            test_df = df.iloc[train_end:train_end + step_size]
+
+            # 在训练集上优化参数
+            best_params = None
+            best_score = -999
+            for params in param_grid:
+                try:
+                    strategy = strategy_class(params)
+                    train_result = self.run(strategy, train_df, df.index.name or 'timestamp')
+                    score = train_result.get('metrics', {}).get('sharpe_ratio', -999) or -999
+                    if score > best_score:
+                        best_score = score
+                        best_params = dict(params)
+                except: pass
+
+            if best_params:
+                # 在测试集上评估
+                strategy = strategy_class(best_params)
+                test_result = self.run(strategy, test_df, df.index.name or 'timestamp')
+                results.append({
+                    'train_end': str(df.index[train_end-1]) if train_end > 0 else '',
+                    'test_start': str(df.index[train_end]),
+                    'best_params': best_params,
+                    'train_score': round(best_score, 4),
+                    'test_score': round(test_result.get('metrics', {}).get('sharpe_ratio', 0) or 0, 4),
+                    'test_return': round(test_result.get('metrics', {}).get('total_return', 0) or 0, 4),
+                })
+
+            train_end += step_size
+
         return results

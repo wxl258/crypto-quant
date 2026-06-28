@@ -28,11 +28,14 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 
@@ -56,6 +59,8 @@ chaquopy {
             install("uvicorn")
             install("pandas")
             install("numpy")
+            // 未来优化：pandas(~30MB) → polars(~15MB) 可减少APK体积
+            // install("polars")
             install("ccxt")
             install("websockets")
             install("pyyaml")

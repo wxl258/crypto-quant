@@ -27,11 +27,25 @@ async function loadStrategyStore() {
             return;
         }
 
-        // Fetch info for each strategy to get enabled/source status
+        // Batch fetch info for all strategies
+        var names = strategies.map(function(s) { return typeof s === 'string' ? s : s.name; });
+        var batchResp = await API.post('/api/strategies/admin/info/batch', {names: names});
+        var infoMap = batchResp.strategies || {};
+
         const rows = [];
         for (const name of strategies) {
+            const strategyName = typeof name === 'string' ? name : name.name;
             try {
-                const info = await API.get(`/api/strategies/admin/info/${name}`);
+                const info = infoMap[strategyName];
+                if (!info || info.status === 'error' || info.status === 'unavailable') {
+                    rows.push(`
+                        <tr>
+                            <td><strong>${escHtml(strategyName)}</strong></td>
+                            <td>--</td><td>--</td><td>--</td>
+                            <td><span style="color:var(--red);font-size:11px;">加载失败</span></td>
+                        </tr>`);
+                    continue;
+                }
                 const enabled = info.enabled !== false;
                 const source = info.source || 'builtin';
                 const sourceLabel = source === 'builtin' ? '🏗️ 内置' : 
@@ -43,23 +57,23 @@ async function loadStrategyStore() {
                 rows.push(`
                     <tr>
                         <td>
-                            <strong>${escHtml(name)}</strong>
+                            <strong>${escHtml(strategyName)}</strong>
                             ${info.description ? `<br><span style="font-size:11px;color:var(--text-muted);">${escHtml(info.description.split('\\n')[0].substring(0, 80))}</span>` : ''}
                         </td>
                         <td><span style="font-size:12px;color:var(--text-muted);">${escHtml(info.class_name || '--')}</span></td>
                         <td>${sourceLabel}</td>
-                        <td><span class="stat-change ${statusClass}" style="cursor:pointer;" onclick="toggleStrategy('${name}', ${enabled})">${statusText}</span></td>
+                        <td><span class="stat-change ${statusClass}" style="cursor:pointer;" onclick="toggleStrategy('${strategyName}', ${enabled})">${statusText}</span></td>
                         <td>
                             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                                <button class="btn-sm" style="font-size:11px;padding:4px 8px;" onclick="viewStrategySource('${name}')">📄 源码</button>
-                                ${isCustom ? `<button class="btn-sm" style="font-size:11px;padding:4px 8px;background:rgba(211,47,47,0.15);color:var(--red);" onclick="deleteStrategyConfirm('${name}')">🗑️ 删除</button>` : ''}
+                                <button class="btn-sm" style="font-size:11px;padding:4px 8px;" onclick="viewStrategySource('${strategyName}')">📄 源码</button>
+                                ${isCustom ? `<button class="btn-sm" style="font-size:11px;padding:4px 8px;background:rgba(211,47,47,0.15);color:var(--red);" onclick="deleteStrategyConfirm('${strategyName}')">🗑️ 删除</button>` : ''}
                             </div>
                         </td>
                     </tr>`);
             } catch (e) {
                 rows.push(`
                     <tr>
-                        <td><strong>${escHtml(name)}</strong></td>
+                        <td><strong>${escHtml(strategyName)}</strong></td>
                         <td>--</td><td>--</td><td>--</td>
                         <td><span style="color:var(--red);font-size:11px;">加载失败</span></td>
                     </tr>`);

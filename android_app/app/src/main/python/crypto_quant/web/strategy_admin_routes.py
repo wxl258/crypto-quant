@@ -164,3 +164,29 @@ class MyCustomStrategy(Strategy):
         return Signal(signal_type=SignalType.HOLD, symbol=self.symbol, price=0)
 '''
     return {"template": template, "language": "python"}
+
+# ── 批量信息 ──
+
+@router.post("/info/batch")
+async def get_strategies_info_batch(request: dict = None):
+    """批量获取策略信息"""
+    try:
+        if request is None:
+            request = {}
+        names = request.get('names', [])
+        if not names:
+            from strategy import StrategyRegistry
+            names = [s['name'] for s in StrategyRegistry.list_strategies()]
+        
+        from strategy.manager import get_strategy_manager
+        mgr = get_strategy_manager()
+        results = {}
+        for name in names:
+            try:
+                info = mgr.get_strategy_info(name) if hasattr(mgr, 'get_strategy_info') else None
+                results[name] = info if info else {"name": name, "status": "unavailable"}
+            except Exception:
+                results[name] = {"name": name, "status": "error"}
+        return {"strategies": results}
+    except Exception as e:
+        return {"error": str(e)}

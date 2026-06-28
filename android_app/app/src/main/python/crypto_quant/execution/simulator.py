@@ -29,6 +29,8 @@ class PaperTradingSimulator:
         self.order_history: List[Dict] = []
         self.equity_history: List[Dict] = []
         self._current_price: Dict[str, float] = {}
+        self.pending_orders: List[Dict] = []
+        self.order_timeout = 30  # 秒
 
         # Persistence layer
         self._store = DataStore(get_db_path())
@@ -175,6 +177,44 @@ class PaperTradingSimulator:
             logger.info(f"PAPER: Closed {symbol} @ {price}, PnL={pnl}")
         return order
     
+    def place_order(self, symbol, side, order_type, price=None, quantity=0, leverage=3):
+        """下单（支持市价/限价）"""
+        if order_type == 'MARKET':
+            return self.open_position(symbol, side, price, leverage)
+        elif order_type == 'LIMIT':
+            order = {
+                'id': str(uuid.uuid4())[:8],
+                'symbol': symbol, 'side': side, 'type': 'LIMIT',
+                'price': price, 'quantity': quantity, 'leverage': leverage,
+                'status': 'PENDING', 'created_at': datetime.now()
+            }
+            self.pending_orders.append(order)
+            return order
+        return None
+
+    def check_pending_orders(self, current_prices: dict):
+        """检查限价单是否成交"""
+        filled = []
+        expired = []
+        now = datetime.now()
+        for order in self.pending_orders:
+            if (now - order['created_at']).total_seconds() > self.order_timeout:
+                order['status'] = 'EXPIRED'
+                expired.append(order)
+                continue
+            price = current_prices.get(order['symbol'])
+            if price is None: continue
+            if (order['side'] == 'LONG' and price <= order['price']) or \
+               (order['side'] == 'SHORT' and price >= order['price']):
+                result = self.open_position(order['symbol'], order['side'], price, order['leverage'])
+                if result:
+                    order['status'] = 'FILLED'
+                    filled.append(order)
+        for o in filled + expired:
+            if o in self.pending_orders:
+                self.pending_orders.remove(o)
+        return filled, expired
+
     def get_total_equity(self) -> float:
         """Calculate total equity including unrealized PnL"""
         unrealized = 0

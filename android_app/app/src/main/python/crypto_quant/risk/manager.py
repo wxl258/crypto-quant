@@ -279,6 +279,28 @@ class RiskManager:
             return (True, self._pause_reason)
         return (False, "")
     
+    def check_portfolio_risk(self, positions: dict, current_prices: dict) -> tuple:
+        """组合层面风控检查"""
+        if not positions:
+            return (True, "")
+        
+        # 计算组合总敞口
+        total_exposure = 0.0
+        for sym, pos in positions.items():
+            price = current_prices.get(sym, pos.get('entry_price', 0))
+            qty = pos.get('quantity', 0)
+            leverage = pos.get('leverage', 1)
+            total_exposure += qty * price * leverage
+        
+        exposure_pct = total_exposure / self.peak_equity if self.peak_equity > 0 else 1.0
+        
+        if exposure_pct > self.limits.max_total_position_pct:
+            self._trading_paused = True
+            self._pause_reason = f"组合敞口超限: {exposure_pct:.1%} > {self.limits.max_total_position_pct:.1%}"
+            return (False, self._pause_reason)
+        
+        return (True, "")
+
     def pause_trading(self, reason: str):
         """Pause trading with reason"""
         self.trading_paused = True

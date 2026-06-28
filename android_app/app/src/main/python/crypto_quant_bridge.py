@@ -25,6 +25,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bridge")
 
+# Server ready event — set when uvicorn has started successfully
+_server_ready = threading.Event()
 # Error propagation event — set when uvicorn crashes
 _server_error = threading.Event()
 _server_error_msg = None
@@ -82,6 +84,8 @@ def start_server(port=8000):
                 loop="asyncio",
             )
             server = uvicorn.Server(config)
+            # Signal Kotlin that the server is about to start
+            _server_ready.set()
             logger.info(f"Starting uvicorn on 127.0.0.1:{port}...")
             server.run()
         except Exception as e:

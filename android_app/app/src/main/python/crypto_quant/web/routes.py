@@ -1822,3 +1822,36 @@ for _name, _module_path in _sub_routers:
         logger.warning(f"Sub-router '{_name}' unavailable ({_module_path}): {e}")
     except Exception as e:
         logger.warning(f"Failed to register sub-router '{_name}': {e}")
+
+# ============================================================
+# Dashboard Snapshot Endpoint
+# ============================================================
+
+@router.get("/dashboard/snapshot")
+async def dashboard_snapshot(symbol: str = Query(default="BTCUSDT"), interval: str = Query(default="1h")):
+    """单次请求获取仪表盘全部数据"""
+    try:
+        import asyncio
+        
+        async def get_account():
+            try:
+                sim = _get_simulator()
+                if sim is None: return {"total_equity": 0, "capital": 0, "positions": []}
+                return sim.get_account_summary()
+            except: return {"error": "account unavailable"}
+        
+        async def get_klines():
+            try:
+                store = _get_store()
+                if store is None: return []
+                df = store.load_ohlcv(symbol, interval, limit=200)
+                if df is None or df.empty: return []
+                return [{"time": str(i[0]), "open": float(i[1]), "high": float(i[2]), 
+                         "low": float(i[3]), "close": float(i[4]), "volume": float(i[5])} 
+                        for i in df.itertuples()][:200]
+            except: return []
+        
+        account, klines = await asyncio.gather(get_account(), get_klines())
+        return {"account": account, "klines": klines, "symbol": symbol, "interval": interval}
+    except Exception as e:
+        return {"error": str(e)}

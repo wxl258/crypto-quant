@@ -447,6 +447,11 @@ function showToast(message, type) {
             if (toast && toast.parentNode) toast.remove();
         }, 300);
     }, 3000);
+
+    // Send system notification for alert/error messages
+    if (type === 'alert' || type === 'error') {
+        sendSystemNotification('CryptoQuant', message);
+    }
 }
 
 /* ==========================================================================
@@ -1726,3 +1731,16 @@ window.fmtUSD = fmtUSD;
 window.fmtPct = fmtPct;
 window.fmtNum = fmtNum;
 window.fmtVolume = fmtVolume;
+
+/* ==========================================================================
+ * SECTION 33 – Android system notification bridge
+ * ========================================================================== */
+function sendSystemNotification(title, body) {
+  try {
+    // 通过 WebView JavaScriptInterface 调用 Android 原生通知
+    if (window.AndroidBridge && window.AndroidBridge.sendNotification) {
+      window.AndroidBridge.sendNotification(title, body);
+    }
+  } catch(e) {}
+}
+window.sendSystemNotification = sendSystemNotification;

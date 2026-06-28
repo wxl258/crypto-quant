@@ -148,3 +148,79 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
             metrics[key] = bool(val)
     
     return metrics
+
+
+def calculate_deflated_sharpe(returns, risk_free_rate=0.02, num_trials=100):
+    """Deflated Sharpe Ratio (Harvey & Liu 2015)"""
+    try:
+        n = len(returns)
+        sr = calculate_sharpe_ratio(returns, risk_free_rate)
+        if sr is None: return None
+        
+        # Bootstrap to estimate Sharpe distribution under null
+        np_mod = __import__('numpy')
+        bootstrapped = []
+        for _ in range(num_trials):
+            sample = np_mod.random.choice(returns, size=n, replace=True)
+            s = (sample.mean() * 252 - risk_free_rate) / (sample.std() * np_mod.sqrt(252)) if sample.std() > 0 else 0
+            bootstrapped.append(s)
+        
+        bootstrapped = np_mod.array(bootstrapped)
+        p_value = (bootstrapped >= sr).mean()
+        return {'sharpe': round(sr, 4), 'bootstrap_pvalue': round(float(p_value), 4),
+                'significant_at_5pct': p_value < 0.05}
+    except Exception:
+        return None
+
+
+def calculate_sharpe_ratio(returns, risk_free_rate=0.02):
+    """Calculate annualized Sharpe ratio from a series of returns."""
+    try:
+        np_mod = __import__('numpy')
+        n = len(returns)
+        if n < 2:
+            return 0.0
+        mean_ret = np_mod.mean(returns)
+        std_ret = np_mod.std(returns)
+        if std_ret == 0:
+            return 0.0
+        return (mean_ret * 252 - risk_free_rate) / (std_ret * np_mod.sqrt(252))
+    except Exception:
+        return 0.0
+
+
+def monte_carlo_simulation(trades, num_simulations=1000, initial_capital=10000):
+    """蒙特卡洛模拟：随机打乱交易顺序"""
+    try:
+        np_mod = __import__('numpy')
+        pnls = [t.get('pnl', 0) for t in trades if isinstance(t, dict)]
+        if not pnls:
+            return None
+
+        final_equities = []
+        max_drawdowns = []
+        for _ in range(num_simulations):
+            shuffled = np_mod.random.permutation(pnls)
+            equity = initial_capital
+            peak = initial_capital
+            max_dd = 0
+            for pnl in shuffled:
+                equity += pnl
+                if equity > peak:
+                    peak = equity
+                dd = (peak - equity) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+            final_equities.append(equity)
+            max_drawdowns.append(max_dd)
+
+        final_equities = np_mod.array(final_equities)
+        return {
+            'mean_equity': round(float(final_equities.mean()), 2),
+            'median_equity': round(float(np_mod.median(final_equities)), 2),
+            'p5_equity': round(float(np_mod.percentile(final_equities, 5)), 2),
+            'p95_equity': round(float(np_mod.percentile(final_equities, 95)), 2),
+            'mean_max_dd': round(float(np_mod.array(max_drawdowns).mean()) * 100, 2),
+            'prob_profit': round(float((final_equities > initial_capital).mean()) * 100, 2),
+        }
+    except Exception:
+        return None

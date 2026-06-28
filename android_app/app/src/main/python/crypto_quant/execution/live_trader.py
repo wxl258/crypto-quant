@@ -74,8 +74,22 @@ class LivePaperTrader:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
-                return {'symbol': data['symbol'], 'last': float(data['price']),
-                        'bid': float(data['price'])*0.999, 'ask': float(data['price'])*1.001}
+                price = float(data['price'])
+                
+                # 交叉验证：尝试获取第二个数据源
+                try:
+                    okx_url = f"https://www.okx.com/api/v5/market/ticker?instId={self.symbol.replace('USDT','-USDT-SWAP')}"
+                    okx_resp = requests.get(okx_url, timeout=3)
+                    if okx_resp.status_code == 200:
+                        okx_data = okx_resp.json()
+                        okx_price = float(okx_data['data'][0]['last'])
+                        if abs(okx_price - price) / price > 0.01:
+                            logger.warning(f"Price divergence: Binance={price} OKX={okx_price}, using Binance")
+                except Exception:
+                    pass  # 交叉验证失败不阻塞主流程
+                
+                return {'symbol': data['symbol'], 'last': price,
+                        'bid': price*0.999, 'ask': price*1.001}
         except Exception:
             pass
 
