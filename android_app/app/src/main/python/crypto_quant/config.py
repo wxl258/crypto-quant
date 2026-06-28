@@ -169,8 +169,13 @@ def get_db_path() -> str:
             from android.storage import app_storage_path
             base = app_storage_path()
             return os.path.join(base, raw)
-        except ImportError:
-            raw = str(Path(__file__).parent / raw)
+        except (ImportError, Exception):
+            # Use HOME directory (Chaquopy standard on Android)
+            home = os.environ.get("HOME", str(Path(__file__).parent))
+            result = os.path.join(home, raw)
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(result), exist_ok=True)
+            return result
     return raw
 
 

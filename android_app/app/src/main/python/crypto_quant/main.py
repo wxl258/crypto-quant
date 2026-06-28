@@ -58,17 +58,23 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 @app.on_event("startup")
 async def startup_event():
     """Start background trading scheduler on server startup."""
-    from execution.scheduler import scheduler
-    await scheduler.start()
-    logger.info("Trading scheduler started")
+    try:
+        from execution.scheduler import scheduler
+        await scheduler.start()
+        logger.info("Trading scheduler started")
+    except Exception as e:
+        logger.warning(f"Scheduler start failed (non-critical): {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background trading scheduler on server shutdown."""
-    from execution.scheduler import scheduler
-    await scheduler.stop()
-    logger.info("Trading scheduler stopped")
+    try:
+        from execution.scheduler import scheduler
+        await scheduler.stop()
+        logger.info("Trading scheduler stopped")
+    except Exception:
+        pass
 
 
 @app.get("/")
