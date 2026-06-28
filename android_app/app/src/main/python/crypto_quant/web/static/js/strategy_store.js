@@ -110,13 +110,13 @@ async function hotReloadStrategies() {
 // ── 从URL安装 ──
 
 function showDownloadModal() {
-    document.getElementById('download-modal').style.display = 'flex';
+    document.getElementById('download-overlay').style.display = 'flex';
     document.getElementById('download-url').value = '';
     document.getElementById('download-sha256').value = '';
 }
 
 function closeDownloadModal() {
-    document.getElementById('download-modal').style.display = 'none';
+    document.getElementById('download-overlay').style.display = 'none';
 }
 
 async function downloadStrategy() {
@@ -128,7 +128,7 @@ async function downloadStrategy() {
         return;
     }
 
-    const btn = document.querySelector('#download-modal .btn-primary');
+    const btn = document.querySelector('#download-overlay .btn-primary');
     btn.disabled = true;
     btn.textContent = '⏳ 下载中...';
 
@@ -179,11 +179,11 @@ async function deleteStrategyConfirm(name) {
 // ── 查看源码 ──
 
 async function viewStrategySource(name) {
-    const modal = document.getElementById('source-modal');
+    const overlay = document.getElementById('source-overlay');
     const title = document.getElementById('source-modal-title');
     const content = document.getElementById('source-content');
 
-    modal.style.display = 'flex';
+    overlay.style.display = 'flex';
     title.textContent = `策略源码: ${name}`;
     content.textContent = '加载中...';
 
@@ -196,16 +196,16 @@ async function viewStrategySource(name) {
 }
 
 function closeSourceModal() {
-    document.getElementById('source-modal').style.display = 'none';
+    document.getElementById('source-overlay').style.display = 'none';
 }
 
 // ── 模板 ──
 
 async function getStrategyTemplate() {
-    const modal = document.getElementById('template-modal');
+    const overlay = document.getElementById('template-overlay');
     const content = document.getElementById('template-content');
 
-    modal.style.display = 'flex';
+    overlay.style.display = 'flex';
     content.textContent = '加载中...';
 
     try {
@@ -217,7 +217,7 @@ async function getStrategyTemplate() {
 }
 
 function closeTemplateModal() {
-    document.getElementById('template-modal').style.display = 'none';
+    document.getElementById('template-overlay').style.display = 'none';
 }
 
 function copyTemplate() {

@@ -143,14 +143,14 @@ function renderStrategyCards(strategies) {
 }
 
 function showStrategyModal(name) {
-    const modal = document.getElementById('strategy-modal');
+    const overlay = document.getElementById('strategy-overlay');
     if (name) document.getElementById('modal-strategy').value = name;
-    modal.style.display = 'flex';
+    overlay.style.display = 'flex';
     updateModalParams();
 }
 
 function closeStrategyModal() {
-    document.getElementById('strategy-modal').style.display = 'none';
+    document.getElementById('strategy-overlay').style.display = 'none';
 }
 
 async function updateModalParams() {
@@ -246,8 +246,8 @@ async function createStrategy() {
 }
 
 // Close modal on overlay click
-document.getElementById('strategy-modal')?.addEventListener('click', function(e) {
-    if (e.target === this) closeStrategyModal();
+document.getElementById('strategy-overlay')?.addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
 });
 
 // Strategy search and filter event listeners

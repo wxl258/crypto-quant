@@ -215,7 +215,7 @@
         <div id="page-strategy" class="page">
             <div class="page-header">
                 <h2>策略管理</h2>
-                <button class="btn btn-primary" data-action="showStrategyModal">+ 新建策略实例</button>
+                <button class="btn btn-primary" onclick="document.getElementById('strategy-overlay').style.display='flex'">+ 新建策略实例</button>
             </div>
             <div class="strategy-filters" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
                 <input type="text" id="strategy-search" placeholder="🔍 搜索策略..."
@@ -493,56 +493,59 @@
                 <h2>🔌 策略商店</h2>
                 <div class="header-actions">
                     <button class="btn btn-primary" data-action="hotReloadStrategies">🔄 热重载</button>
-                    <button class="btn" data-action="showDownloadModal" style="background:var(--bg-hover);color:var(--text-primary);">+ 从URL安装</button>
+                    <button class="btn" onclick="document.getElementById('download-overlay').style.display='flex'" style="background:var(--bg-hover);color:var(--text-primary);">+ 从URL安装</button>
                 </div>
             </div>
 
             <!-- Download Modal (inline) -->
-            <div id="download-modal" class="modal" style="display:none">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>从URL安装策略</h3>
-                        <button class="modal-close" data-action="closeDownloadModal">✕</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="form-group">
-                            <label>策略文件URL</label>
-                            <input type="text" id="download-url" class="form-input" placeholder="https://example.com/my_strategy.py">
-                        </div>
-                        <div class="form-group">
-                            <label>SHA256校验 (可选)</label>
-                            <input type="text" id="download-sha256" class="form-input" placeholder="留空跳过校验">
-                        </div>
-                        <button class="btn btn-primary btn-block" data-action="downloadStrategy">📥 下载并安装</button>
-                    </div>
+            <div class="cq-overlay" id="download-overlay" style="display:none">
+              <div class="cq-sheet">
+                <div class="cq-sheet-handle"></div>
+                <div class="cq-sheet-header">
+                  <span class="cq-sheet-title">从URL安装策略</span>
+                  <button class="cq-sheet-close" onclick="document.getElementById('download-overlay').style.display='none'">✕</button>
                 </div>
+                <div class="cq-sheet-body">
+                    <div class="form-group">
+                        <label>策略文件URL</label>
+                        <input type="text" id="download-url" class="form-input" placeholder="https://example.com/my_strategy.py">
+                    </div>
+                    <div class="form-group">
+                        <label>SHA256校验 (可选)</label>
+                        <input type="text" id="download-sha256" class="form-input" placeholder="留空跳过校验">
+                    </div>
+                    <button class="btn btn-primary btn-block" data-action="downloadStrategy">📥 下载并安装</button>
+                </div>
+              </div>
             </div>
 
             <!-- Source View Modal -->
-            <div id="source-modal" class="modal" style="display:none">
-                <div class="modal-content" style="max-width:800px;">
-                    <div class="modal-header">
-                        <h3 id="source-modal-title">策略源码</h3>
-                        <button class="modal-close" data-action="closeSourceModal">✕</button>
-                    </div>
-                    <div class="modal-body">
-                        <pre id="source-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
-                    </div>
+            <div class="cq-overlay" id="source-overlay" style="display:none">
+              <div class="cq-sheet" style="max-width:800px;">
+                <div class="cq-sheet-handle"></div>
+                <div class="cq-sheet-header">
+                  <span class="cq-sheet-title" id="source-modal-title">策略源码</span>
+                  <button class="cq-sheet-close" onclick="document.getElementById('source-overlay').style.display='none'">✕</button>
                 </div>
+                <div class="cq-sheet-body">
+                    <pre id="source-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
+                </div>
+              </div>
             </div>
 
             <!-- Template Modal -->
-            <div id="template-modal" class="modal" style="display:none">
-                <div class="modal-content" style="max-width:800px;">
-                    <div class="modal-header">
-                        <h3>策略开发模板</h3>
-                        <button class="modal-close" data-action="closeTemplateModal">✕</button>
-                    </div>
-                    <div class="modal-body">
-                        <pre id="template-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
-                        <button class="btn btn-primary btn-block" style="margin-top:16px;" data-action="copyTemplate">📋 复制模板</button>
-                    </div>
+            <div class="cq-overlay" id="template-overlay" style="display:none">
+              <div class="cq-sheet" style="max-width:800px;">
+                <div class="cq-sheet-handle"></div>
+                <div class="cq-sheet-header">
+                  <span class="cq-sheet-title">策略开发模板</span>
+                  <button class="cq-sheet-close" onclick="document.getElementById('template-overlay').style.display='none'">✕</button>
                 </div>
+                <div class="cq-sheet-body">
+                    <pre id="template-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
+                    <button class="btn btn-primary btn-block" style="margin-top:16px;" data-action="copyTemplate">📋 复制模板</button>
+                </div>
+              </div>
             </div>
 
             <!-- Installed Strategies Table -->
@@ -761,45 +764,46 @@
 </div>
 
 <!-- Strategy Modal -->
-<div id="strategy-modal" class="modal" style="display:none">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>创建策略实例</h3>
-            <button class="modal-close" data-action="closeStrategyModal">✕</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>选择策略</label>
-                <select id="modal-strategy" class="form-select">
-                    <option value="dual_ma">双均线策略</option>
-                    <option value="rsi_mean_reversion">RSI均值回归</option>
-                    <option value="macd">MACD策略</option>
-                    <option value="bollinger_bands">布林带策略</option>
-                    <option value="supertrend">超级趋势</option>
-                    <option value="turtle">海龟交易</option>
-                    <option value="grid">网格策略</option>
-                    <option value="trend_follower">趋势跟踪</option>
-                    <option value="mean_reversion_v2">均值回归V2</option>
-                    <option value="funding_arb">资金费率套利</option>
-                    <option value="adaptive">自适应策略</option>
-                    <option value="smart_meta">智能元策略</option>
-                    <option value="ensemble_conservative">保守组合</option>
-                    <option value="ensemble_balanced">平衡组合</option>
-                    <option value="ensemble_aggressive">激进组合</option>
-                    <option value="ensemble_trend">趋势组合</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>交易对</label>
-                <select id="modal-symbol" class="form-select">
-                    <option>BTCUSDT</option><option>ETHUSDT</option>
-                    <option>SOLUSDT</option><option>DOGEUSDT</option>
-                </select>
-            </div>
-            <div id="modal-params"></div>
-            <button class="btn btn-primary btn-block" data-action="createStrategy">创建</button>
-        </div>
+<div class="cq-overlay" id="strategy-overlay" style="display:none">
+  <div class="cq-sheet">
+    <div class="cq-sheet-handle"></div>
+    <div class="cq-sheet-header">
+      <span class="cq-sheet-title">创建策略实例</span>
+      <button class="cq-sheet-close" onclick="document.getElementById('strategy-overlay').style.display='none'">✕</button>
     </div>
+    <div class="cq-sheet-body">
+        <div class="form-group">
+            <label>选择策略</label>
+            <select id="modal-strategy" class="form-select">
+                <option value="dual_ma">双均线策略</option>
+                <option value="rsi_mean_reversion">RSI均值回归</option>
+                <option value="macd">MACD策略</option>
+                <option value="bollinger_bands">布林带策略</option>
+                <option value="supertrend">超级趋势</option>
+                <option value="turtle">海龟交易</option>
+                <option value="grid">网格策略</option>
+                <option value="trend_follower">趋势跟踪</option>
+                <option value="mean_reversion_v2">均值回归V2</option>
+                <option value="funding_arb">资金费率套利</option>
+                <option value="adaptive">自适应策略</option>
+                <option value="smart_meta">智能元策略</option>
+                <option value="ensemble_conservative">保守组合</option>
+                <option value="ensemble_balanced">平衡组合</option>
+                <option value="ensemble_aggressive">激进组合</option>
+                <option value="ensemble_trend">趋势组合</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>交易对</label>
+            <select id="modal-symbol" class="form-select">
+                <option>BTCUSDT</option><option>ETHUSDT</option>
+                <option>SOLUSDT</option><option>DOGEUSDT</option>
+            </select>
+        </div>
+        <div id="modal-params"></div>
+        <button class="btn btn-primary btn-block" data-action="createStrategy">创建</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/js/error_handler.js"></script>
@@ -812,6 +816,21 @@
   <input type="text" id="qt-amount" placeholder="数量" value="0.01">
   <button class="btn-buy" onclick="quickBuy()">买入 LONG</button>
   <button class="btn-sell" onclick="quickSell()">卖出 SHORT</button>
+</div>
+
+<!-- Bottom Navigation (Mobile) -->
+<div class="bottom-nav" id="bottom-nav">
+  <a href="#" class="nav-item active" data-page="dashboard"><span class="nav-icon">📈</span>仪表盘</a>
+  <a href="#" class="nav-item" data-page="strategy"><span class="nav-icon">🧪</span>策略</a>
+  <a href="#" class="nav-item" data-page="lab"><span class="nav-icon">🔬</span>回测</a>
+  <a href="#" class="nav-item" data-page="recommend"><span class="nav-icon">🧠</span>AI推荐</a>
+  <a href="#" class="nav-item nav-more" id="nav-more-btn"><span class="nav-icon">⋯</span>更多</a>
+</div>
+<div class="more-menu" id="more-menu">
+  <a href="#" data-page="settings">⚙️ 设置</a>
+  <a href="#" data-page="backup">💾 备份</a>
+  <a href="#" data-page="strategy_store">🔌 策略商店</a>
+  <a href="#" data-page="trades">📋 交易记录</a>
 </div>
 
 </body>

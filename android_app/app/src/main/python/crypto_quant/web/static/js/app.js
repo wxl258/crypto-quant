@@ -1393,8 +1393,10 @@ function useRecommendedStrategy(strategyKey, strategyName) {
 }
 
 function closeOverlay() {
-    var overlay = document.querySelector('.signal-detail-overlay');
-    if (overlay) overlay.remove();
+    var overlay = document.querySelector('.cq-overlay[style*="display: flex"]');
+    if (overlay) overlay.style.display = 'none';
+    var signalOverlay = document.querySelector('.signal-detail-overlay');
+    if (signalOverlay) signalOverlay.remove();
 }
 
 /* ==========================================================================
@@ -1604,4 +1606,29 @@ function init() {
 // Run init after DOM is ready (also fires from DOMContentLoaded handler)
 document.addEventListener('DOMContentLoaded', function() {
     init();
+});
+
+/* ==========================================================================
+ * SECTION 29 – More menu toggle (bottom nav mobile)
+ * ========================================================================== */
+
+document.getElementById('nav-more-btn')?.addEventListener('click', function(e) {
+  e.preventDefault();
+  var menu = document.getElementById('more-menu');
+  menu.classList.toggle('show');
+});
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('more-menu');
+  if (menu && menu.classList.contains('show') && !e.target.closest('#more-menu') && !e.target.closest('#nav-more-btn')) {
+    menu.classList.remove('show');
+  }
+});
+
+/* ==========================================================================
+ * SECTION 30 – Unified overlay close (click backdrop to dismiss)
+ * ========================================================================== */
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('cq-overlay')) {
+    e.target.style.display = 'none';
+  }
 });
