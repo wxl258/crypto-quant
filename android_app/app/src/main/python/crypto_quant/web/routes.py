@@ -3,7 +3,14 @@ Web API Routes — FastAPI endpoints for the trading system
 """
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+# 兼容 Pydantic v1 和 v2
+try:
+    from pydantic import field_validator
+except ImportError:
+    # Pydantic v1 fallback
+    from pydantic import validator as field_validator
 from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 import pandas as pd
@@ -49,7 +56,7 @@ class BacktestRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_backtest(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")
@@ -63,7 +70,7 @@ class TradeRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_trade(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")
@@ -75,7 +82,7 @@ class CloseTradeRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_close(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")

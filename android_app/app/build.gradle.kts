@@ -61,7 +61,7 @@ chaquopy {
             install("requests")
             install("scikit-learn")
             install("fpdf2")
-            install("pydantic")
+            install("pydantic>=2.0")
             install("plyer")
             install("websocket-client")
         }
