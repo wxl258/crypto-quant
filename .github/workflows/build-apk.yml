@@ -18,8 +18,8 @@ jobs:
         run: |
           sudo apt update -qq
           sudo apt install -y -qq git zip unzip openjdk-17-jdk python3-pip \
-            autoconf libtool cmake libffi-dev libssl-dev libltdl-dev \
-            python3-dev ccache patch
+            autoconf automake libtool cmake libffi-dev libssl-dev libltdl-dev \
+            python3-dev ccache patch gettext autopoint pkg-config
 
       - name: 安装 Buildozer
         run: pip3 install --user buildozer cython
@@ -30,9 +30,9 @@ jobs:
           path: |
             ~/.buildozer/android/platform
             .buildozer/android/platform
-          key: ${{ runner.os }}-android-v2-${{ hashFiles('buildozer.spec') }}
+          key: ${{ runner.os }}-android-v3-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            ${{ runner.os }}-android-v2-
+            ${{ runner.os }}-android-v3-
 
       - name: 首次初始化 buildozer（下载 SDK/NDK）
         run: |
