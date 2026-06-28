@@ -17,7 +17,6 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -102,20 +101,10 @@ class MainActivity : AppCompatActivity() {
         detailText.text = ""
         progressBar.visibility = View.VISIBLE
 
-        // Step 1: Initialize Python on the MAIN thread (Chaquopy requirement)
-        try {
-            if (!Python.isStarted()) {
-                Python.start(AndroidPlatform(applicationContext))
-            }
-        } catch (e: Exception) {
-            val errMsg = e.message ?: "未知错误"
-            updateUI("Python 初始化失败: $errMsg", e.javaClass.simpleName)
-            progressBar.visibility = View.GONE
-            serverStarted.set(false)
-            return
-        }
+        // Python 已由 CryptoQuantApp (extends PyApplication) 自动初始化
+        // 无需手动调用 Python.start()
 
-        // Step 2: Start Python server on background thread
+        // Start Python server on background thread
         executor.execute {
             try {
                 updateUI("正在启动交易引擎...", "加载量化系统模块")
