@@ -47,8 +47,12 @@ class MeanReversionV2Strategy(Strategy):
             'adx_trend_threshold': 30,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._entry_score: int = 0
 
     @classmethod

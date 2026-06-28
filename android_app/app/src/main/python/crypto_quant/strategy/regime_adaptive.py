@@ -27,7 +27,7 @@ class RegimeAdaptiveStrategy(Strategy):
     bull/bear/range regimes, then applies the optimal strategy for each.
     """
 
-    def __init__(self, params: Dict = None):
+    def __init__(self, params: Dict = None, **kwargs):
         merged = {
             'sma_short': 50, 'sma_long': 200,
             'bull_threshold': 0.15, 'bear_threshold': -0.15,
@@ -36,7 +36,9 @@ class RegimeAdaptiveStrategy(Strategy):
         }
         if params:
             merged.update(params)
-        super().__init__(merged)
+        if kwargs:
+            merged = {**merged, **kwargs}
+        super().__init__(params=merged)
         self._analyzer = None
         self._regime_data = None
 

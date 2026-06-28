@@ -46,8 +46,12 @@ class RSIMeanReversionStrategy(Strategy):
             'adx_trend_threshold': 30,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._partial_tp_triggered: bool = False
         self._tp_price: float = float('inf')
         self._sl_price: float = 0.0

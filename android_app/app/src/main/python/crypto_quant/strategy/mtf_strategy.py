@@ -28,8 +28,12 @@ class MTFStrategy(Strategy):
             'min_alignment_score': 2,  # 0-3, higher = stricter
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._intraday_strategy = TrendFollowerStrategy()
         self._daily_sma = None
         self._daily_adx_proxy = None

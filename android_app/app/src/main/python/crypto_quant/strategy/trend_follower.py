@@ -39,8 +39,12 @@ class TrendFollowerStrategy(Strategy):
             'min_hold_bars': 1,  # minimum bars to hold (0=disabled)
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._trailing_high: float = 0.0
         self._trailing_low: float = float('inf')
         self._entry_atr: float = 0.0  # lock ATR at entry for stop distance

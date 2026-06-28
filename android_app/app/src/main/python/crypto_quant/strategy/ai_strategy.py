@@ -40,8 +40,12 @@ class AIAssistedStrategy(Strategy):
             'sma_period': 50,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._predictor = None
         self._prev_direction = 0
         self._prev_confidence = 0.0

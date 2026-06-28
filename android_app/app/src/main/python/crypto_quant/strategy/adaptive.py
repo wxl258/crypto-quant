@@ -38,8 +38,12 @@ class AdaptiveEnsembleStrategy(Strategy):
             'vol_max_threshold': 0.08,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._rsi = RSIMeanReversionStrategy({'rsi_period': 14, 'oversold': 30, 'overbought': 70, 'exit_mid': 50, 'use_mid_exit': True, 'leverage': 3})
         self._bollinger = BollingerBandsStrategy({'period': 20, 'std_dev': 2.0, 'use_reversal': True, 'leverage': 3})
         self._supertrend = SuperTrendStrategy({'fast_atr': 10, 'fast_mult': 2.0, 'slow_atr': 14, 'slow_mult': 3.0, 'cooldown_bars': 5, 'leverage': 3})

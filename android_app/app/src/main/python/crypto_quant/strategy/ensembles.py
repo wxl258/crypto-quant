@@ -26,8 +26,12 @@ class EnsembleConservative(PortfolioStrategy):
             'require_exit_consensus': False,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self.add_strategy(RSIMeanReversionStrategy({'rsi_period': 14, 'oversold': 30, 'overbought': 70, 'exit_mid': 50, 'use_mid_exit': True}), 1.0)
         self.add_strategy(BollingerBandsStrategy({'period': 20, 'std_dev': 2.0, 'use_reversal': True}), 1.0)
 
@@ -52,8 +56,12 @@ class EnsembleBalanced(PortfolioStrategy):
             'require_exit_consensus': False,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self.add_strategy(RSIMeanReversionStrategy({'rsi_period': 14, 'oversold': 30, 'overbought': 70}), 1.0)
         self.add_strategy(BollingerBandsStrategy({'period': 20, 'std_dev': 2.0, 'use_reversal': True}), 1.0)
         self.add_strategy(MACDStrategy({'fast_period': 12, 'slow_period': 26, 'signal_period': 9}), 0.5)
@@ -79,8 +87,12 @@ class EnsembleAggressive(PortfolioStrategy):
             'require_exit_consensus': False,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self.add_strategy(RSIMeanReversionStrategy({'rsi_period': 14, 'oversold': 30, 'overbought': 70}), 1.0)
         self.add_strategy(BollingerBandsStrategy({'period': 20, 'std_dev': 2.0, 'use_reversal': True}), 1.0)
         self.add_strategy(MACDStrategy({'fast_period': 12, 'slow_period': 26, 'signal_period': 9}), 1.0)
@@ -107,8 +119,12 @@ class EnsembleTrend(PortfolioStrategy):
             'require_exit_consensus': True,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self.add_strategy(SuperTrendStrategy({'fast_atr': 10, 'fast_mult': 2.0, 'slow_atr': 14, 'slow_mult': 3.0, 'cooldown_bars': 3}), 1.0)
         self.add_strategy(TurtleStrategy({'entry_period': 20, 'exit_period': 10, 'atr_period': 20, 'atr_stop': 2.0}), 1.0)
         self.add_strategy(MACDStrategy({'fast_period': 12, 'slow_period': 26, 'signal_period': 9}), 1.0)

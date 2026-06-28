@@ -29,8 +29,12 @@ class PortfolioStrategy(Strategy):
             'weight_lookback': 20,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._sub_strategies: List[Tuple[Strategy, float]] = []
         self._base_weights: List[float] = []
         self._trade_pnls: List[List[float]] = []  # per-strategy recent PnLs

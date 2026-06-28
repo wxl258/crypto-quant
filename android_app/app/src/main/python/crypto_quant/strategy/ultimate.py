@@ -37,8 +37,12 @@ class UltimateStrategy(Strategy):
             'et_weight': 0.25,  # ensemble_trend weight
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._trend_follower = TrendFollowerStrategy()
         self._smart_meta = SmartMetaStrategy()
         self._ensemble_trend = EnsembleTrend()

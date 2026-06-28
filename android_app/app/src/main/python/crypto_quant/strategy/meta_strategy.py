@@ -30,8 +30,12 @@ class MetaStrategy(Strategy):
             'min_confidence': 0.5, 'min_regime_bars': 2,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._trend_strategy = EnsembleTrend()
         self._range_strategy = MeanReversionV2Strategy()
         self._analyzer = None
