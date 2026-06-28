@@ -175,34 +175,41 @@ async function _loadKlineChartInner(symbol, interval) {
 
         klineChart = LightweightCharts.createChart(container, {
             layout: {
-                background: { color: '#21243a' },
-                textColor: '#8b8fa8',
+                background: { color: 'transparent' },
+                textColor: '#94a3b8',
+                fontSize: 12,
             },
             grid: {
-                vertLines: { color: 'rgba(46,49,80,0.5)' },
-                horzLines: { color: 'rgba(46,49,80,0.5)' },
+                vertLines: { color: 'rgba(35, 38, 53, 0.5)' },
+                horzLines: { color: 'rgba(35, 38, 53, 0.5)' },
             },
-            crosshair: { mode: 1 },
-            rightPriceScale: { borderColor: '#2e3150' },
+            crosshair: {
+                mode: 1,
+                vertLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
+                horzLine: { color: 'rgba(59, 130, 246, 0.5)', width: 1 },
+            },
+            rightPriceScale: { borderColor: '#232635' },
             timeScale: {
-                borderColor: '#2e3150',
+                borderColor: '#232635',
                 timeVisible: true,
+                borderVisible: true,
             },
             width: container.clientWidth,
-            height: 400,
+            height: Math.max(260, container.clientHeight || 400),
+            handleScroll: { vertTouchDrag: false },
         });
 
         candleSeries = klineChart.addCandlestickSeries({
-            upColor: '#4caf84',
-            downColor: '#ef5350',
-            borderUpColor: '#4caf84',
-            borderDownColor: '#ef5350',
-            wickUpColor: '#4caf84',
-            wickDownColor: '#ef5350',
+            upColor: '#22c55e',
+            downColor: '#ef4444',
+            borderUpColor: '#22c55e',
+            borderDownColor: '#ef4444',
+            wickUpColor: '#22c55e',
+            wickDownColor: '#ef4444',
         });
 
         volumeSeries = klineChart.addHistogramSeries({
-            color: 'rgba(79,195,247,0.3)',
+            color: 'rgba(59, 130, 246, 0.3)',
             priceFormat: { type: 'volume' },
             priceScaleId: '',
         });
