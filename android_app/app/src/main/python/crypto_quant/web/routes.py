@@ -444,6 +444,81 @@ def _generate_sample_klines(limit: int = 500):
     return data
 
 
+def _fetch_binance_history(symbol: str, interval: str, days: int = 90) -> Optional[list]:
+    """
+    Fetch historical klines directly from Binance public REST API.
+    No ccxt dependency — uses urllib/requests.
+    Returns list of kline dicts with timestamp/open/high/low/close/volume.
+    """
+    import requests
+    import time
+
+    interval_map = {
+        '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w',
+    }
+    binance_interval = interval_map.get(interval, '1h')
+
+    # Binance API: max 1000 candles per request, we paginate
+    all_klines = []
+    end_time = int(time.time() * 1000)
+    start_time = end_time - days * 86400 * 1000
+    limit = 1000
+    max_pages = max(1, (days * 24 * 60) // (60 * limit)) + 5  # rough estimate
+
+    for page in range(max_pages):
+        url = (
+            f"https://api.binance.com/api/v3/klines"
+            f"?symbol={symbol}&interval={binance_interval}"
+            f"&limit={limit}"
+        )
+        if page > 0 and all_klines:
+            # Use the earliest timestamp we have as end_time
+            end_time = all_klines[0][0] - 1
+            url += f"&endTime={end_time}"
+        elif page == 0:
+            url += f"&endTime={end_time}"
+
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code != 200:
+                logger.warning(f"Binance API returned {resp.status_code}: {resp.text[:200]}")
+                break
+            klines = resp.json()
+            if not klines or not isinstance(klines, list):
+                break
+
+            # Prepend to maintain chronological order
+            all_klines = klines + all_klines
+
+            # Check if we've fetched enough data (earliest candle < start_time)
+            if klines[0][0] <= start_time:
+                break
+
+            if len(klines) < limit:
+                break
+
+        except Exception as e:
+            logger.warning(f"Binance history fetch error: {e}")
+            break
+
+    if not all_klines:
+        return None
+
+    # Convert to our standard format
+    result = []
+    for k in all_klines:
+        result.append({
+            'timestamp': int(k[0]),
+            'open': float(k[1]),
+            'high': float(k[2]),
+            'low': float(k[3]),
+            'close': float(k[4]),
+            'volume': float(k[5]),
+        })
+    return result
+
+
 # ============================================================
 # Health Endpoint
 # ============================================================
@@ -681,7 +756,14 @@ async def reload_strategies():
 # ============================================================
 
 def _load_backtest_data(request, cfg):
-    """Load OHLCV data for backtest, falling back to sample data."""
+    """Load OHLCV data for backtest, falling back to sample data.
+    
+    Priority:
+    1. Local SQLite database (previously cached data)
+    2. Binance public REST API (no API key needed, no ccxt)
+    3. ccxt collector (if available)
+    4. Sample/generated data (last resort)
+    """
     store = _get_store()
     symbol = request.symbol
     interval = request.interval
@@ -692,7 +774,25 @@ def _load_backtest_data(request, cfg):
     if store is not None:
         df = store.load_ohlcv(symbol, interval, limit=fetch_limit)
 
-    # If no data, try fetching
+    # If no data, try Binance public API directly (no ccxt dependency)
+    if (df is None or (hasattr(df, 'empty') and df.empty)) and request.days:
+        try:
+            raw_data = _fetch_binance_history(
+                symbol, interval, days=max(request.days, 90)
+            )
+            if raw_data:
+                pd_mod, np_mod = _import_pandas_numpy()
+                df = pd_mod.DataFrame(raw_data)
+                df['timestamp'] = pd_mod.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
+                # Save to local DB for future use
+                if store is not None:
+                    store.save_ohlcv(symbol, interval, df)
+                logger.info(f"Fetched {len(df)} {interval} candles for {symbol} from Binance API")
+        except Exception as e:
+            logger.warning(f"Binance API history fetch failed: {e}")
+
+    # Fallback: try ccxt collector
     if (df is None or (hasattr(df, 'empty') and df.empty)) and request.days:
         c = _get_collector()
         if c is not None:
@@ -704,20 +804,20 @@ def _load_backtest_data(request, cfg):
     # Filter by date range if we have data
     if df is not None and not (hasattr(df, 'empty') and df.empty):
         try:
-            pd, _ = _import_pandas_numpy()
+            pd_mod, _ = _import_pandas_numpy()
             if request.date_start:
-                df = df[df.index >= pd.Timestamp(request.date_start)]
+                df = df[df.index >= pd_mod.Timestamp(request.date_start)]
             if request.date_end:
-                df = df[df.index <= pd.Timestamp(request.date_end) + pd.Timedelta(days=1)]
+                df = df[df.index <= pd_mod.Timestamp(request.date_end) + pd_mod.Timedelta(days=1)]
         except Exception:
             pass
 
-    # Fallback to sample data
+    # Last resort: sample data
     if df is None or (hasattr(df, 'empty') and df.empty):
         sample = _generate_sample_klines(1000)
-        pd, _ = _import_pandas_numpy()
-        df = pd.DataFrame(sample)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        pd_mod, _ = _import_pandas_numpy()
+        df = pd_mod.DataFrame(sample)
+        df['timestamp'] = pd_mod.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
 
     return df
