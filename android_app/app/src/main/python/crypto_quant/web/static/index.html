@@ -24,7 +24,7 @@
 </script>
 <div class="app">
     <!-- Mobile hamburger button -->
-    <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation" onclick="toggleSidebar()">☰</button>
+    <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation" data-action="toggleSidebar">☰</button>
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
@@ -75,7 +75,7 @@
             <div class="mode-toggle">
                 <span class="mode-label" id="mode-display">模拟盘</span>
                 <label class="switch">
-                    <input type="checkbox" id="mode-switch" onchange="toggleMode()">
+                    <input type="checkbox" id="mode-switch" data-action="toggleMode">
                     <span class="slider"></span>
                 </label>
             </div>
@@ -105,7 +105,7 @@
                     <div style="font-size:40px; margin-bottom:8px;">🚀</div>
                     <div style="font-size:18px; font-weight:bold; color:#4fc3f7; margin-bottom:8px;">欢迎使用量化交易系统</div>
                     <div style="color:#8b8fa8; font-size:13px; margin-bottom:16px;">一键启动，使用最优策略自动交易</div>
-                    <button id="quick-start-btn" onclick="quickStart()" style="background:linear-gradient(135deg, #4fc3f7, #2196f3); color:white; border:none; padding:14px 40px; border-radius:25px; font-size:16px; font-weight:bold; cursor:pointer;">
+                    <button id="quick-start-btn" data-action="quickStart" style="background:linear-gradient(135deg, #4fc3f7, #2196f3); color:white; border:none; padding:14px 40px; border-radius:25px; font-size:16px; font-weight:bold; cursor:pointer;">
                         🚀 一键启动（模拟盘）
                     </button>
                     <div style="color:#8b8fa8; font-size:11px; margin-top:8px;">使用 RSI均值回归策略 · BTCUSDT · 1小时K线 · 零风险</div>
@@ -170,9 +170,9 @@
                 <div class="panel-header">
                     <h3>📅 盈亏日历</h3>
                     <div style="display:flex;gap:8px;align-items:center;">
-                        <button class="btn-sm" onclick="changeCalendarMonth(-1)">◀</button>
+                        <button class="btn-sm" data-action="changeCalendarMonth:-1">◀</button>
                         <span id="calendar-month-label" style="font-size:13px;color:var(--text-secondary)"></span>
-                        <button class="btn-sm" onclick="changeCalendarMonth(1)">▶</button>
+                        <button class="btn-sm" data-action="changeCalendarMonth:1">▶</button>
                     </div>
                 </div>
                 <div style="padding:12px;" id="pnl-calendar">
@@ -209,7 +209,7 @@
         <div id="page-strategy" class="page">
             <div class="page-header">
                 <h2>策略管理</h2>
-                <button class="btn btn-primary" onclick="showStrategyModal()">+ 新建策略实例</button>
+                <button class="btn btn-primary" data-action="showStrategyModal">+ 新建策略实例</button>
             </div>
             <div class="strategy-filters" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
                 <input type="text" id="strategy-search" placeholder="🔍 搜索策略..."
@@ -232,7 +232,7 @@
             </div>
             <!-- 策略排行 -->
             <div class="panel" id="strategy-ranking-panel">
-                <div class="panel-header" onclick="toggleRanking()" style="cursor:pointer;">
+                <div class="panel-header" data-action="toggleRanking" style="cursor:pointer;">
                     <h3>🏆 策略表现排行</h3>
                     <span id="ranking-toggle-icon">▼</span>
                 </div>
@@ -311,10 +311,10 @@
                     <div id="bt-params" class="form-group">
                         <!-- Dynamic params -->
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="runBacktest()">
+                    <button class="btn btn-primary btn-block" data-action="runBacktest">
                         🚀 开始回测
                     </button>
-                    <button class="btn btn-block" style="background:var(--bg-hover);color:var(--text-primary);margin-top:8px" onclick="runCompareAll()">
+                    <button class="btn btn-block" style="background:var(--bg-hover);color:var(--text-primary);margin-top:8px" data-action="runCompareAll">
                         📊 全部策略对比
                     </button>
                 </div>
@@ -337,8 +337,8 @@
                         <div class="metric-card"><span class="metric-label">总交易</span><span class="metric-value" id="m-trades">--</span></div>
                     </div>
                     <div class="export-buttons" id="bt-export" style="display:none;margin-bottom:16px">
-                        <button class="btn btn-sm" onclick="exportBacktestCSV()" style="margin-right:8px">导出 CSV</button>
-                        <button class="btn btn-sm" onclick="exportBacktestPDF()">导出 PDF</button>
+                        <button class="btn btn-sm" data-action="exportBacktestCSV" style="margin-right:8px">导出 CSV</button>
+                        <button class="btn btn-sm" data-action="exportBacktestPDF">导出 PDF</button>
                     </div>
                     <div class="panel">
                         <div class="panel-header"><h3>交易明细</h3></div>
@@ -422,7 +422,7 @@
                         <label>默认止盈 (%)</label>
                         <input type="number" id="risk-tp" class="form-input" value="10" min="0.1" max="100" step="0.1">
                     </div>
-                    <button class="btn btn-primary" onclick="updateRiskLimits()">保存参数</button>
+                    <button class="btn btn-primary" data-action="updateRiskLimits">保存参数</button>
                 </div>
             </div>
         </div>
@@ -457,7 +457,7 @@
                             <option>SOLUSDT</option><option>DOGEUSDT</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="runLabTest()" style="font-size:18px;padding:16px;margin-top:16px;">
+                    <button class="btn btn-primary btn-block" data-action="runLabTest" style="font-size:18px;padding:16px;margin-top:16px;">
                         🚀 开始测试
                     </button>
                 </div>
@@ -486,8 +486,8 @@
             <div class="page-header">
                 <h2>🔌 策略商店</h2>
                 <div class="header-actions">
-                    <button class="btn btn-primary" onclick="hotReloadStrategies()">🔄 热重载</button>
-                    <button class="btn" onclick="showDownloadModal()" style="background:var(--bg-hover);color:var(--text-primary);">+ 从URL安装</button>
+                    <button class="btn btn-primary" data-action="hotReloadStrategies">🔄 热重载</button>
+                    <button class="btn" data-action="showDownloadModal" style="background:var(--bg-hover);color:var(--text-primary);">+ 从URL安装</button>
                 </div>
             </div>
 
@@ -496,7 +496,7 @@
                 <div class="modal-content">
                     <div class="modal-header">
                         <h3>从URL安装策略</h3>
-                        <button class="modal-close" onclick="closeDownloadModal()">✕</button>
+                        <button class="modal-close" data-action="closeDownloadModal">✕</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
@@ -507,7 +507,7 @@
                             <label>SHA256校验 (可选)</label>
                             <input type="text" id="download-sha256" class="form-input" placeholder="留空跳过校验">
                         </div>
-                        <button class="btn btn-primary btn-block" onclick="downloadStrategy()">📥 下载并安装</button>
+                        <button class="btn btn-primary btn-block" data-action="downloadStrategy">📥 下载并安装</button>
                     </div>
                 </div>
             </div>
@@ -517,7 +517,7 @@
                 <div class="modal-content" style="max-width:800px;">
                     <div class="modal-header">
                         <h3 id="source-modal-title">策略源码</h3>
-                        <button class="modal-close" onclick="closeSourceModal()">✕</button>
+                        <button class="modal-close" data-action="closeSourceModal">✕</button>
                     </div>
                     <div class="modal-body">
                         <pre id="source-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
@@ -530,11 +530,11 @@
                 <div class="modal-content" style="max-width:800px;">
                     <div class="modal-header">
                         <h3>策略开发模板</h3>
-                        <button class="modal-close" onclick="closeTemplateModal()">✕</button>
+                        <button class="modal-close" data-action="closeTemplateModal">✕</button>
                     </div>
                     <div class="modal-body">
                         <pre id="template-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
-                        <button class="btn btn-primary btn-block" style="margin-top:16px;" onclick="copyTemplate()">📋 复制模板</button>
+                        <button class="btn btn-primary btn-block" style="margin-top:16px;" data-action="copyTemplate">📋 复制模板</button>
                     </div>
                 </div>
             </div>
@@ -567,8 +567,8 @@
             <div class="panel" style="margin-top:16px;">
                 <div class="panel-header"><h3>快捷操作</h3></div>
                 <div style="display:flex;gap:12px;padding:16px;flex-wrap:wrap;">
-                    <button class="btn" onclick="getStrategyTemplate()" style="background:var(--bg-hover);color:var(--text-primary);">📄 获取开发模板</button>
-                    <button class="btn" onclick="discoverStrategies()" style="background:var(--bg-hover);color:var(--text-primary);">🔍 扫描策略</button>
+                    <button class="btn" data-action="getStrategyTemplate" style="background:var(--bg-hover);color:var(--text-primary);">📄 获取开发模板</button>
+                    <button class="btn" data-action="discoverStrategies" style="background:var(--bg-hover);color:var(--text-primary);">🔍 扫描策略</button>
                 </div>
             </div>
         </div>
@@ -595,8 +595,8 @@
 
             <!-- 操作区 -->
             <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-                <button class="btn btn-primary" onclick="createBackup()">+ 创建备份</button>
-                <button class="btn btn-primary" onclick="refreshBackups()" style="background:var(--bg-hover);color:var(--text-primary);">🔄 刷新</button>
+                <button class="btn btn-primary" data-action="createBackup">+ 创建备份</button>
+                <button class="btn btn-primary" data-action="refreshBackups" style="background:var(--bg-hover);color:var(--text-primary);">🔄 刷新</button>
             </div>
 
             <!-- 备份列表 -->
@@ -623,7 +623,7 @@
                 <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;align-items:end;">
                     <div class="form-group">
                         <label>告警类型</label>
-                        <select id="alert-type" class="form-select" onchange="onAlertTypeChange()">
+                        <select id="alert-type" class="form-select" data-action="onAlertTypeChange">
                             <option value="price">价格告警</option>
                             <option value="pnl">盈亏告警</option>
                         </select>
@@ -652,7 +652,7 @@
                         <input type="text" id="alert-message" class="form-input" placeholder="例如：BTC价格突破60000提醒">
                     </div>
                     <div>
-                        <button class="btn btn-primary btn-block" onclick="createAlert()">+ 添加告警</button>
+                        <button class="btn btn-primary btn-block" data-action="createAlert">+ 添加告警</button>
                     </div>
                 </div>
             </div>
@@ -661,7 +661,7 @@
             <div class="panel">
                 <div class="panel-header">
                     <h3>告警列表</h3>
-                    <button class="btn-sm" onclick="refreshAlerts()">🔄 刷新</button>
+                    <button class="btn-sm" data-action="refreshAlerts">🔄 刷新</button>
                 </div>
                 <div class="table-container">
                     <table class="data-table" id="alerts-table">
@@ -679,14 +679,14 @@
             <div class="page-header">
                 <h2>🧠 AI策略推荐</h2>
                 <div class="header-actions">
-                    <select id="recommend-symbol" class="select-sm" onchange="loadRecommend()">
+                    <select id="recommend-symbol" class="select-sm" data-action="loadRecommend">
                         <option value="BTCUSDT">BTC/USDT</option>
                         <option value="ETHUSDT">ETH/USDT</option>
                         <option value="SOLUSDT">SOL/USDT</option>
                         <option value="DOGEUSDT">DOGE/USDT</option>
                         <option value="BNBUSDT">BNB/USDT</option>
                     </select>
-                    <button class="btn-sm" onclick="loadRecommend()">🔄 刷新分析</button>
+                    <button class="btn-sm" data-action="loadRecommend">🔄 刷新分析</button>
                 </div>
             </div>
 
@@ -759,7 +759,7 @@
     <div class="modal-content">
         <div class="modal-header">
             <h3>创建策略实例</h3>
-            <button class="modal-close" onclick="closeStrategyModal()">✕</button>
+            <button class="modal-close" data-action="closeStrategyModal">✕</button>
         </div>
         <div class="modal-body">
             <div class="form-group">
@@ -791,7 +791,7 @@
                 </select>
             </div>
             <div id="modal-params"></div>
-            <button class="btn btn-primary btn-block" onclick="createStrategy()">创建</button>
+            <button class="btn btn-primary btn-block" data-action="createStrategy">创建</button>
         </div>
     </div>
 </div>

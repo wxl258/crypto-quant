@@ -161,7 +161,13 @@ def get_timezone() -> str:
     return get_trading_config().get("timezone", "Asia/Shanghai")
 
 
+_DB_PATH_CACHE = None
+
+
 def get_db_path() -> str:
+    global _DB_PATH_CACHE
+    if _DB_PATH_CACHE is not None:
+        return _DB_PATH_CACHE
     raw = get_data_config().get("db_path", "data/market.db")
     if not os.path.isabs(raw):
         # Android: use app private storage directory
@@ -170,13 +176,16 @@ def get_db_path() -> str:
             base = app_storage_path()
             result = os.path.join(base, raw)
             os.makedirs(os.path.dirname(result), exist_ok=True)
+            _DB_PATH_CACHE = result
             return result
         except (ImportError, Exception):
             # Use HOME directory (Chaquopy standard on Android)
             home = os.environ.get("HOME", str(Path(__file__).parent))
             # 简化路径，直接用 market.db
             result = os.path.join(home, "market.db")
+            _DB_PATH_CACHE = result
             return result
+    _DB_PATH_CACHE = raw
     return raw
 
 

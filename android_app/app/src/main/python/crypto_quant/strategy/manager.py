@@ -149,6 +149,15 @@ class StrategyManager:
     
     def download_strategy(self, url: str, expected_sha256: str = "") -> Tuple[bool, str]:
         """从URL下载策略文件并加载"""
+        from urllib.parse import urlparse
+        
+        # URL domain whitelist
+        allowed_domains = {"github.com", "raw.githubusercontent.com", "gitee.com"}
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        if not any(domain == d or domain.endswith("." + d) for d in allowed_domains):
+            return False, f"不允许从该域名下载: {domain}。仅允许: {', '.join(sorted(allowed_domains))}"
+        
         import requests
         
         try:
@@ -158,11 +167,12 @@ class StrategyManager:
             
             content = resp.text
             
-            # SHA256 校验
-            if expected_sha256:
-                actual_sha256 = hashlib.sha256(content.encode()).hexdigest()
-                if actual_sha256 != expected_sha256:
-                    return False, f"SHA256校验失败\n期望: {expected_sha256[:16]}...\n实际: {actual_sha256[:16]}..."
+            # SHA256 校验 (required for security)
+            actual_sha256 = hashlib.sha256(content.encode()).hexdigest()
+            if not expected_sha256:
+                return False, "必须提供 expected_sha256 进行安全校验"
+            if actual_sha256 != expected_sha256:
+                return False, f"SHA256校验失败\n期望: {expected_sha256[:16]}...\n实际: {actual_sha256[:16]}..."
             
             # 从URL提取文件名
             filename = url.split("/")[-1]

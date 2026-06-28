@@ -1,11 +1,11 @@
-# Strategy package — registers all built-in strategies on import
-# All imports wrapped in try/except to survive Chaquopy environment
+# Strategy package — lazy-loads built-in strategies on demand
 import logging
 logger = logging.getLogger(__name__)
 
 from strategy.base import StrategyRegistry
 
-_strategies = [
+# Lazy-load registry: maps strategy name → (module_path, class_name)
+_lazy_strategies = [
     ("dual_ma", "strategy.dual_ma", "DualMAStrategy"),
     ("rsi_mean_reversion", "strategy.rsi_mean_reversion", "RSIMeanReversionStrategy"),
     ("grid", "strategy.grid", "GridStrategy"),
@@ -33,16 +33,47 @@ _strategies = [
     ("multi_agent", "strategy.multi_agent_strategy", "MultiAgentStrategy"),
 ]
 
-_import_errors = []
+# Store lazy-load info as a dict for fast lookup
+_lazy_map = {name: (module, class_name) for name, module, class_name in _lazy_strategies}
 
-for _name, _module, _class in _strategies:
-    try:
-        mod = __import__(_module, fromlist=[_class])
-        cls = getattr(mod, _class)
-        StrategyRegistry.register(_name, cls)
-    except Exception as e:
-        _import_errors.append(f"{_name}: {e}")
-        logger.warning(f"Strategy '{_name}' failed to load: {e}")
+# Monkey-patch StrategyRegistry.get() for lazy loading
+_original_get = StrategyRegistry.get
 
-if _import_errors:
-    logger.warning(f"{len(_import_errors)}/{len(_strategies)} strategies failed to load")
+def _lazy_get(name: str):
+    """Lazy-load a strategy class on first access."""
+    cls = _original_get(name)
+    if cls is not None:
+        return cls
+    # Not yet loaded — try lazy import
+    if name in _lazy_map:
+        module_path, class_name = _lazy_map[name]
+        try:
+            mod = __import__(module_path, fromlist=[class_name])
+            cls = getattr(mod, class_name)
+            StrategyRegistry.register(name, cls)
+            return cls
+        except Exception as e:
+            logger.warning(f"Strategy '{name}' failed to lazy-load: {e}")
+    return None
+
+StrategyRegistry.get = classmethod(_lazy_get)
+
+# Also patch list_strategies to include unloaded strategies
+_original_list_strategies = StrategyRegistry.list_strategies
+
+def _lazy_list_strategies(cls):
+    result = _original_list_strategies()
+    loaded_names = {r['name'] for r in result}
+    # Add unloaded strategies with minimal info
+    for name in _lazy_map:
+        if name not in loaded_names:
+            result.append({
+                "name": name,
+                "class": _lazy_map[name][1],
+                "module": _lazy_map[name][0],
+                "description": "",
+                "parameters": [],
+            })
+    return result
+
+StrategyRegistry.list_strategies = classmethod(_lazy_list_strategies)

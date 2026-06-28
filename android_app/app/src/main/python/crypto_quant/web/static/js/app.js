@@ -785,7 +785,7 @@ async function loadSignals() {
             var price = bot.current_price ? fmtUSD(bot.current_price) : '--';
 
             var guideJSON = guide ? JSON.stringify(guide).replace(/"/g, '&quot;') : 'null';
-            return '<div class="signal-card" onclick="showSignalDetail(\'' + escHtml(strategyKey) + '\',\'' + escHtml(direction) + '\',' + guideJSON + ')" style="cursor:pointer;">' +
+            return '<div class="signal-card" data-action="showSignalDetail" data-action-args="' + escHtml(JSON.stringify({strategyKey: strategyKey, direction: direction, guideData: guideData})) + '" style="cursor:pointer;">' +
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
                     '<span style="font-size:20px;">' + icon + '</span>' +
                     '<div>' +
@@ -855,7 +855,7 @@ function showSignalDetail(strategyKey, direction, guideData) {
                 '<div>\u26a0\ufe0f \u4e0d\u9002\u5408: ' + escHtml(guide.unsuitable || '--') + '</div>' +
                 (guide.tips ? '<div>\ud83d\udca1 ' + escHtml(guide.tips) + '</div>' : '') +
             '</div>') : '') +
-            '<button class="btn btn-primary btn-block" style="margin-top:16px;" onclick="this.closest(\'.signal-detail-overlay\').remove()">\u77e5\u9053\u4e86</button>' +
+            '<button class="btn btn-primary btn-block" style="margin-top:16px;" data-action="closeOverlay">\u77e5\u9053\u4e86</button>' +
         '</div>';
     document.body.appendChild(overlay);
 
@@ -956,9 +956,9 @@ async function refreshBackups() {
                 '<td>' + (b.size_mb || 0) + ' MB</td>' +
                 '<td>' + fmtTime(b.created_at) + '</td>' +
                 '<td>' +
-                    '<button class="btn-sm-card primary" onclick="downloadBackup(\'' + escHtml(b.filename) + '\')">\u4e0b\u8f7d</button>' +
-                    '<button class="btn-sm-card" style="border-color:var(--orange);color:var(--orange)" onclick="restoreBackup(\'' + escHtml(b.filename) + '\')">\u6062\u590d</button>' +
-                    '<button class="btn-sm-card danger" onclick="deleteBackup(\'' + escHtml(b.filename) + '\')">\u5220\u9664</button>' +
+                    '<button class="btn-sm-card primary" data-action="downloadBackup" data-action-args="' + escHtml(JSON.stringify({filename: b.filename})) + '">\u4e0b\u8f7d</button>' +
+                    '<button class="btn-sm-card" style="border-color:var(--orange);color:var(--orange)" data-action="restoreBackup" data-action-args="' + escHtml(JSON.stringify({filename: b.filename})) + '">\u6062\u590d</button>' +
+                    '<button class="btn-sm-card danger" data-action="deleteBackup" data-action-args="' + escHtml(JSON.stringify({filename: b.filename})) + '">\u5220\u9664</button>' +
                 '</td>' +
             '</tr>';
         }).join('');
@@ -1072,8 +1072,8 @@ async function refreshAlerts() {
                 '<td>' + escHtml(a.message || '--') + '</td>' +
                 '<td><span class="' + statusCls + '">' + statusLabel + '</span></td>' +
                 '<td>' +
-                    '<button class="btn-sm-card" onclick="toggleAlert(\'' + escHtml(a.id) + '\', ' + !a.enabled + ')">' + (a.enabled ? '\u7981\u7528' : '\u542f\u7528') + '</button>' +
-                    '<button class="btn-sm-card danger" onclick="deleteAlert(\'' + escHtml(a.id) + '\')">\u5220\u9664</button>' +
+                    '<button class="btn-sm-card" data-action="toggleAlert" data-action-args="' + escHtml(JSON.stringify({alertId: a.id, enabled: !a.enabled})) + '">' + (a.enabled ? '\u7981\u7528' : '\u542f\u7528') + '</button>' +
+                    '<button class="btn-sm-card danger" data-action="deleteAlert" data-action-args="' + escHtml(JSON.stringify({alertId: a.id})) + '">\u5220\u9664</button>' +
                 '</td>' +
             '</tr>';
         }).join('');
@@ -1160,8 +1160,8 @@ async function showNoteEditor(tradeId, currentNote) {
             '<h3 style="margin-bottom:12px;">\ud83d\udcdd \u4ea4\u6613\u7b14\u8bb0</h3>' +
             '<textarea id="note-textarea" style="width:100%;min-height:120px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);padding:12px;font-size:14px;resize:vertical;" placeholder="\u8bb0\u5f55\u8fd9\u7b14\u4ea4\u6613\u7684\u60f3\u6cd5...">' + escHtml(currentNote || '') + '</textarea>' +
             '<div style="display:flex;gap:8px;margin-top:12px;">' +
-                '<button class="btn btn-primary" style="flex:1;" onclick="saveNote(' + tradeId + ', document.getElementById(\'note-textarea\').value, this.closest(\'.signal-detail-overlay\'))">\u4fdd\u5b58</button>' +
-                '<button class="btn" style="flex:1;background:var(--bg-hover);color:var(--text-primary);" onclick="this.closest(\'.signal-detail-overlay\').remove()">\u53d6\u6d88</button>' +
+                '<button class="btn btn-primary" style="flex:1;" data-action="saveNoteFromEditor" data-action-args="' + escHtml(JSON.stringify({tradeId: tradeId})) + '">\u4fdd\u5b58</button>' +
+                '<button class="btn" style="flex:1;background:var(--bg-hover);color:var(--text-primary);" data-action="closeOverlay">\u53d6\u6d88</button>' +
             '</div>' +
         '</div>';
     document.body.appendChild(overlay);
@@ -1174,6 +1174,14 @@ async function showNoteEditor(tradeId, currentNote) {
         var sheet = overlay.querySelector('.signal-detail-sheet');
         if (sheet) sheet.style.transform = 'translateY(0)';
     });
+}
+
+async function saveNoteFromEditor(tradeId) {
+    if (tradeId === undefined || tradeId === null) return;
+    var textarea = safeGet('#note-textarea');
+    var noteText = textarea ? textarea.value : '';
+    var overlay = document.querySelector('.signal-detail-overlay');
+    await saveNote(tradeId, noteText, overlay);
 }
 
 async function saveNote(tradeId, noteText, overlay) {
@@ -1283,7 +1291,7 @@ async function loadRecommend() {
                         '<div style="width:60px;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">' +
                             '<div style="height:100%;background:' + scoreColor + ';border-radius:3px;width:' + (r.score * 10) + '%;transition:width 0.8s ease;"></div>' +
                         '</div>' +
-                        '<button class="btn-sm-card primary" onclick="useRecommendedStrategy(\'' + r.strategy + '\',\'' + escHtml(r.name_cn) + '\')" style="font-size:12px;white-space:nowrap;">' +
+                        '<button class="btn-sm-card primary" data-action="useRecommendedStrategy" data-action-args="' + escHtml(JSON.stringify({strategyKey: r.strategy, strategyName: r.name_cn})) + '" style="font-size:12px;white-space:nowrap;">' +
                             '\ud83d\ude80 \u4f7f\u7528\u6b64\u7b56\u7565' +
                         '</button>' +
                     '</div>' +
@@ -1383,3 +1391,84 @@ function useRecommendedStrategy(strategyKey, strategyName) {
 
     showToast('\u5df2\u9009\u62e9\u7b56\u7565: ' + (strategyName || strategyKey), 'info');
 }
+
+function closeOverlay() {
+    var overlay = document.querySelector('.signal-detail-overlay');
+    if (overlay) overlay.remove();
+}
+
+/* ==========================================================================
+ * SECTION 25 – Unified event delegation for data-action
+ * ========================================================================== */
+
+(function() {
+    document.addEventListener('click', function(e) {
+        var target = e.target.closest('[data-action]');
+        if (!target) return;
+
+        var action = target.getAttribute('data-action');
+        if (!action) return;
+
+        // Handle action:arg syntax (e.g. "changeCalendarMonth:-1")
+        var colonIdx = action.indexOf(':');
+        var fnName = colonIdx !== -1 ? action.substring(0, colonIdx) : action;
+        var arg = colonIdx !== -1 ? action.substring(colonIdx + 1) : undefined;
+
+        // Check for JSON args in data-action-args
+        var argsJson = target.getAttribute('data-action-args');
+
+        // Map to global function
+        if (typeof window[fnName] === 'function') {
+            e.preventDefault();
+            try {
+                if (argsJson) {
+                    var parsed = JSON.parse(argsJson);
+                    // Call function with parsed values keyed by function parameter names
+                    var funcStr = window[fnName].toString();
+                    var paramMatch = funcStr.match(/\(([^)]*)\)/);
+                    var paramNames = [];
+                    if (paramMatch && paramMatch[1].trim()) {
+                        paramNames = paramMatch[1].split(',').map(function(s) {
+                            return s.trim().replace(/\/\*.*?\*\//g, '').replace(/\/\/.*/g, '').trim();
+                        });
+                    }
+                    var argsArr = paramNames.map(function(name) {
+                        return parsed[name];
+                    });
+                    window[fnName].apply(window, argsArr);
+                } else if (arg !== undefined) {
+                    // Try numeric first
+                    var numVal = Number(arg);
+                    if (!isNaN(numVal) && String(numVal) === arg) {
+                        window[fnName](numVal);
+                    } else {
+                        window[fnName](arg);
+                    }
+                } else {
+                    window[fnName]();
+                }
+            } catch (err) {
+                console.error('Error calling ' + fnName + ':', err);
+                showToast('操作失败: ' + friendlyError(err.message), 'error');
+            }
+        }
+    });
+
+    // Handle change events on select elements with data-action
+    document.addEventListener('change', function(e) {
+        var target = e.target.closest('[data-action]');
+        if (!target) return;
+
+        var action = target.getAttribute('data-action');
+        if (!action) return;
+
+        if (typeof window[action] === 'function') {
+            try {
+                window[action]();
+            } catch (err) {
+                console.error('Error calling ' + action + ':', err);
+                showToast('操作失败: ' + friendlyError(err.message), 'error');
+            }
+        }
+    });
+})();

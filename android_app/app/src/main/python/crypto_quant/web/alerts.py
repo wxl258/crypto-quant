@@ -57,7 +57,7 @@ class AlertManager:
                 logger.error(f"Telegram HTTP error: {resp.status_code}")
             return False
         except requests.RequestException as e:
-            logger.error(f"Telegram request failed: {e}")
+            logger.error(f"Telegram request failed: {type(e).__name__}")
             return False
 
     def send_trade_alert(self, symbol: str, side: str, price: float, pnl: float = 0) -> bool:

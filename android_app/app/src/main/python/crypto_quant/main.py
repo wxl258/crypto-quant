@@ -9,9 +9,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import logging
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pathlib import Path
 
 from config import get_mode, get_web_config
@@ -58,6 +59,16 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 else:
     logger.warning(f"Static directory not found: {static_dir}")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler — prevents leaking internal details to clients."""
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "内部服务器错误", "detail": "服务器遇到意外错误，已记录日志"},
+    )
 
 
 @app.on_event("startup")

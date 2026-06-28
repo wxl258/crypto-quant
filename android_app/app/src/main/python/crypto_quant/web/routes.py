@@ -7,11 +7,12 @@ import json
 import os
 import io
 import itertools
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Literal
 
 # ── Safe framework imports (these are always available) ──
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -385,6 +386,13 @@ def _get_alert_manager():
     return _alert_manager
 
 
+def _mask_key(key: str) -> str:
+    """Mask API key showing only first 4 and last 4 characters."""
+    if not key or len(key) <= 8:
+        return "****"
+    return key[:4] + "*" * (len(key) - 8) + key[-4:]
+
+
 # ── Helpers ──
 
 def _parse_symbols() -> List[dict]:
@@ -748,31 +756,35 @@ async def run_backtest_compare(request: BacktestRequest):
         symbol = request.symbol
         interval = request.interval
 
-        results = []
-        for s in StrategyRegistry.list_strategies():
+        def _run_one(name):
             try:
                 result = _run_backtest_core(
-                    s['name'], symbol, interval,
+                    name, symbol, interval,
                     request.initial_capital or cfg['get_backtest_config']().get('initial_capital', 10000),
                     request.params, df
                 )
-                results.append({
-                    'name': s['name'],
+                return {
+                    'name': name,
                     'trades': result['metrics']['total_trades'],
                     'win_rate': result['metrics']['win_rate'],
                     'total_return': result['metrics']['total_return'],
                     'sharpe_ratio': result['metrics']['sharpe_ratio'],
                     'max_drawdown': result['metrics']['max_drawdown'],
                     'profit_factor': result['metrics']['profit_factor'],
-                })
+                }
             except Exception as e:
-                results.append({'name': s['name'], 'error': str(e)[:80]})
+                return {'name': name, 'error': str(e)[:80]}
+
+        loop = asyncio.get_running_loop()
+        strategy_names = [s['name'] for s in StrategyRegistry.list_strategies()]
+        tasks = [loop.run_in_executor(None, _run_one, name) for name in strategy_names]
+        results = await asyncio.gather(*tasks)
 
         return {
             'symbol': symbol, 'interval': interval,
             'candles': len(df),
             'date_start': str(df.index[0].date()), 'date_end': str(df.index[-1].date()),
-            'results': results,
+            'results': list(results),
         }
     except Exception as e:
         logger.error(f"Error in backtest compare: {e}")
@@ -1586,9 +1598,14 @@ class ExchangeKeyRequest(BaseModel):
 
 
 @router.post("/exchange/set-key")
-async def set_exchange_key(request: ExchangeKeyRequest):
+async def set_exchange_key(req: Request, request: ExchangeKeyRequest):
     """Set exchange API keys from settings page (not just onboarding)."""
     try:
+        # Security: only allow localhost to set API keys
+        client_host = req.client.host if req.client else None
+        if client_host != "127.0.0.1":
+            return {"error": "拒绝访问", "detail": "出于安全考虑，设置API密钥仅允许本地访问"}
+        
         cfg = _import_config()
         config = cfg['get_config']()
 
@@ -1620,6 +1637,7 @@ async def set_exchange_key(request: ExchangeKeyRequest):
             "exchange": request.exchange_id,
             "testnet": request.testnet,
             "message": f"{request.exchange_id} API密钥已保存",
+            "api_key_masked": _mask_key(request.api_key),
         }
     except Exception as e:
         return {"error": "保存API密钥失败", "detail": str(e)}
