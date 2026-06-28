@@ -101,73 +101,68 @@ class MainActivity : AppCompatActivity() {
         detailText.text = ""
         progressBar.visibility = View.VISIBLE
 
-        // Python 已由 CryptoQuantApp (extends PyApplication) 自动初始化
-        // 无需手动调用 Python.start()
+        // Python 已由 CryptoQuantApp 在 Application.onCreate() 中初始化
+        // 所有 Python 调用必须在主线程进行 (Chaquopy 限制)
 
-        // Start Python server on background thread
-        executor.execute {
-            try {
-                updateUI("正在启动交易引擎...", "加载量化系统模块")
+        try {
+            updateUI("正在启动交易引擎...", "加载量化系统模块")
 
-                val py = Python.getInstance()
-                val module = py.getModule("crypto_quant_bridge")
-                val bridgeReady = module.callAttr("start_server", serverPort) as? Boolean ?: false
+            val py = Python.getInstance()
+            val module = py.getModule("crypto_quant_bridge")
+            module.callAttr("start_server", serverPort)
 
-                if (!bridgeReady) {
-                    updateUI("交易引擎启动失败", "Python 服务器未能启动，请查看日志")
-                    progressBar.visibility = View.GONE
-                    serverStarted.set(false)
-                    return@execute
-                }
-
-                // Poll health endpoint
-                updateUI("等待交易引擎就绪...", "尝试连接本地服务")
-
-                var connected = false
-                for (i in 1..maxRetries) {
-                    try {
-                        val url = java.net.URL("http://127.0.0.1:$serverPort/health")
-                        val conn = url.openConnection() as java.net.HttpURLConnection
-                        conn.connectTimeout = 2000
-                        conn.readTimeout = 2000
-                        val code = conn.responseCode
-                        conn.disconnect()
-                        if (code == 200) {
-                            connected = true
-                            break
-                        }
-                    } catch (_: Exception) {
-                        // Server not ready yet, keep polling
-                    }
-
-                    if (i % 5 == 0) {
-                        updateUI("等待交易引擎就绪... ($i/$maxRetries)", "正在启动量化系统服务")
-                    }
-                    Thread.sleep(500)
-                }
-
-                if (connected) {
-                    pythonReady.set(true)
-                    updateUI("交易引擎已启动！", "正在加载界面...")
-
-                    // 在主线程加载页面
-                    handler.post {
-                        webView.loadUrl("http://127.0.0.1:$serverPort")
-                    }
-                } else {
-                    updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
-                    progressBar.visibility = View.GONE
-                    serverStarted.set(false)
-                }
-
-            } catch (e: Exception) {
-                val errMsg = e.message ?: "未知错误"
-                val errDetail = e.cause?.message ?: e.javaClass.simpleName
-                e.printStackTrace()
-                updateUI("启动失败: $errMsg", errDetail)
-                progressBar.visibility = View.GONE
-                serverStarted.set(false)
+            // Start polling in background thread (HTTP calls are fine off main thread)
+            executor.execute {
+                pollServerHealth()
             }
+
+        } catch (e: Exception) {
+            val errMsg = e.message ?: "未知错误"
+            val errDetail = e.cause?.message ?: e.javaClass.simpleName
+            e.printStackTrace()
+            updateUI("启动失败: $errMsg", errDetail)
+            progressBar.visibility = View.GONE
+            serverStarted.set(false)
+        }
+    }
+
+    private fun pollServerHealth() {
+        updateUI("等待交易引擎就绪...", "尝试连接本地服务")
+
+        var connected = false
+        for (i in 1..maxRetries) {
+            try {
+                val url = java.net.URL("http://127.0.0.1:$serverPort/health")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 2000
+                conn.readTimeout = 2000
+                val code = conn.responseCode
+                conn.disconnect()
+                if (code == 200) {
+                    connected = true
+                    break
+                }
+            } catch (_: Exception) {
+                // Server not ready yet, keep polling
+            }
+
+            if (i % 5 == 0) {
+                updateUI("等待交易引擎就绪... ($i/$maxRetries)", "正在启动量化系统服务")
+            }
+            try { Thread.sleep(500) } catch (_: InterruptedException) { break }
+        }
+
+        if (connected) {
+            pythonReady.set(true)
+            updateUI("交易引擎已启动！", "正在加载界面...")
+
+            handler.post {
+                webView.loadUrl("http://127.0.0.1:$serverPort")
+            }
+        } else {
+            updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
+            progressBar.visibility = View.GONE
+            serverStarted.set(false)
         }
     }
 
