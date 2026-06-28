@@ -1120,14 +1120,15 @@ body {
 
 @media (max-width: 480px) {
     .app { flex-direction: column; }
+    .hamburger-btn { display: none; } /* 底部导航已足够，不需要汉堡按钮 */
     .sidebar {
         position: fixed;
         bottom: 0; top: auto; left: 0; right: 0;
-        width: 100%; height: 64px;
+        width: 100%; height: 52px;
         flex-direction: row;
         border-right: none;
         border-top: 1px solid var(--border);
-        background: rgba(17,20,31,0.9);
+        background: rgba(17,20,31,0.95);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
     }
@@ -1139,21 +1140,28 @@ body {
     }
     .nav-item {
         flex-direction: column; gap: 2px;
-        padding: 6px 4px; font-size: 10px;
-        min-height: 48px; justify-content: center; align-items: center;
+        padding: 4px 2px; font-size: 9px;
+        min-height: 44px; justify-content: center; align-items: center;
         border-radius: var(--radius-xs);
+        margin-bottom: 0;
+        flex: 1;
     }
     .nav-item.active::before { display: none; }
-    .nav-item .nav-icon { font-size: 20px; }
-    .nav-item span:not(.nav-icon) { display: block !important; font-size: 10px; }
-    .main-content { margin-left: 0; margin-bottom: 72px; padding: 12px; }
+    .nav-item .nav-icon { font-size: 18px; }
+    .nav-item span:not(.nav-icon) { display: block !important; font-size: 9px; }
+    .main-content { margin-left: 0; margin-bottom: 56px; padding: 12px; padding-bottom: 16px; }
     .page-header { flex-direction: column; align-items: flex-start; gap: 8px; }
     .page-header h2 { font-size: 18px; }
-    .stats-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
     .strategies-grid { grid-template-columns: 1fr; }
     .card-params { grid-template-columns: 1fr; }
+    .strategy-card { padding: 18px; }
+    .strategy-card h3 { font-size: 15px; }
     .strategy-filters { flex-direction: column; }
     .strategy-filters input, .strategy-filters select { width: 100% !important; min-width: 0 !important; }
     .modal-content { width: 95%; max-height: 85vh; }
     .form-select, .form-input { min-height: 44px; font-size: 16px; }
+    .chart-container { padding: 12px; }
+    .btn-sm-card { padding: 6px 8px; font-size: 11px; }
+    .toast { max-width: 90vw; }
 }

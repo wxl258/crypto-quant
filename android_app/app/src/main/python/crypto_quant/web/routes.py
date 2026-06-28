@@ -303,9 +303,15 @@ async def get_klines(
     if df is None or df.empty:
         return _generate_sample_klines(limit)
 
-    df = df.reset_index()
-    df['timestamp'] = df['timestamp'].astype(int) // 10**6
-    return df.to_dict('records')
+    # Ensure timestamp column exists (store uses 'open_time')
+    if 'open_time' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['open_time']).astype('int64') // 10**6
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = df['timestamp'].astype(int) // 10**6
+    else:
+        return _generate_sample_klines(limit)
+
+    return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].to_dict('records')
 
 
 @router.get("/market/symbols")
