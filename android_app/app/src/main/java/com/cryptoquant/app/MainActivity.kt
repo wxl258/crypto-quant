@@ -100,15 +100,21 @@ class MainActivity : AppCompatActivity() {
         detailText.text = ""
         progressBar.visibility = View.VISIBLE
 
+        // Step 1: Initialize Python on the MAIN thread (Chaquopy requirement)
+        try {
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(applicationContext))
+            }
+        } catch (e: Exception) {
+            val errMsg = e.message ?: "未知错误"
+            updateUI("Python 初始化失败: $errMsg", e.javaClass.simpleName)
+            progressBar.visibility = View.GONE
+            return
+        }
+
+        // Step 2: Start Python server and poll health on background thread
         executor.execute {
             try {
-                updateUI("正在初始化 Python 环境...", "")
-
-                // Initialize Python using Application context to avoid leaks
-                if (!Python.isStarted()) {
-                    Python.start(AndroidPlatform(applicationContext))
-                }
-
                 updateUI("正在启动交易引擎...", "加载量化系统模块")
 
                 // Get Python instance and run the bridge (returns immediately)
