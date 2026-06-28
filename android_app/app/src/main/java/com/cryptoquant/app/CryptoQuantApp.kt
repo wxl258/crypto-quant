@@ -1,20 +1,10 @@
 package com.cryptoquant.app
 
-import android.app.Application
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
+import com.chaquo.python.android.PyApplication
 
 /**
- * Application class that initializes Python via Chaquopy.
- * Python.start() is called here exactly once per process, on the main thread.
- * All Activities can then use Python.getInstance() without re-initializing.
+ * Application class using Chaquopy's PyApplication.
+ * PyApplication automatically calls Python.start() in onCreate()
+ * on the correct thread with the correct context.
  */
-class CryptoQuantApp : Application() {
-    override fun onCreate() {
-        super.onCreate()
-        // Initialize Python on the main thread — required by Chaquopy
-        if (!Python.isStarted()) {
-            Python.start(AndroidPlatform(this))
-        }
-    }
-}
+class CryptoQuantApp : PyApplication()
