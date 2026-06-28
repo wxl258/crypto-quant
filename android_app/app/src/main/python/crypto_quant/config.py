@@ -43,8 +43,62 @@ def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _load_config() -> Dict[str, Any]:
     config_path = Path(__file__).parent / "config.yaml"
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+
+    # 尝试加载 YAML 配置文件
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+    except (FileNotFoundError, IOError, yaml.YAMLError) as e:
+        # Android 环境或文件缺失时的 fallback：使用内嵌默认配置
+        import logging
+        logging.getLogger(__name__).warning(
+            f"无法加载 config.yaml ({e})，使用内置默认配置"
+        )
+        config = {
+            "mode": "paper",
+            "binance": {"api_key": "", "api_secret": "", "testnet": True},
+            "okx": {"api_key": "", "api_secret": "", "password": "", "testnet": True},
+            "exchange": {"id": "binance", "testnet": True},
+            "trading": {
+                "default_symbol": "BTCUSDT",
+                "default_leverage": 3,
+                "default_quantity": 0.01,
+                "offline_pause": True,
+                "timezone": "Asia/Shanghai",
+                "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "BNBUSDT"],
+            },
+            "risk": {
+                "max_position_pct": 0.3,
+                "max_total_position_pct": 0.8,
+                "max_daily_loss_pct": 0.05,
+                "max_consecutive_losses": 3,
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.10,
+                "position_sizing": "fixed",
+            },
+            "data": {
+                "db_path": "data/market.db",
+                "kline_intervals": ["1m", "5m", "15m", "1h", "4h", "1d"],
+            },
+            "backtest": {
+                "initial_capital": 10000,
+                "commission": 0.0005,
+                "slippage": 0.0002,
+                "slippage_model": "volume",
+                "funding_rate": 0.0001,
+                "position_pct": 0.3,
+                "default_leverage": 3,
+                "dynamic_leverage": True,
+                "dynamic_trailing_stop": True,
+            },
+            "alerts": {
+                "telegram_bot_token": "",
+                "telegram_chat_id": "",
+                "enabled": False,
+            },
+            "web": {"host": "0.0.0.0", "port": 8000},
+        }
+
     return _apply_env_overrides(config)
 
 
