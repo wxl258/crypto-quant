@@ -9,6 +9,8 @@ import io
 import itertools
 import asyncio
 import functools
+import threading
+import atexit
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Optional, List, Literal
@@ -19,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # ── Pydantic v1/v2 compatibility ──
+_field_validator_available = True
 try:
     from pydantic import field_validator
 except ImportError:
@@ -26,12 +29,19 @@ except ImportError:
         from pydantic import validator as field_validator
     except ImportError:
         field_validator = None  # type: ignore
+        _field_validator_available = False
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 # Dedicated thread pool for backtest comparison
 _backtest_compare_executor = ThreadPoolExecutor(max_workers=4)
+
+def _shutdown_executor():
+    """Clean up thread pool on exit."""
+    _backtest_compare_executor.shutdown(wait=False)
+
+atexit.register(_shutdown_executor)
 
 # ── Module availability flags (lazy-checked) ──
 _MODULE_STATUS = {}
@@ -268,64 +278,77 @@ _simulator = None
 _alert_manager = None
 active_bots: dict = {}
 _live_client = None
+# Thread locks for lazy initialization safety
+_data_store_lock = threading.Lock()
+_collector_lock = threading.Lock()
+_simulator_lock = threading.Lock()
+_alert_manager_lock = threading.Lock()
+_live_client_lock = threading.Lock()
+_active_bots_lock = threading.Lock()
 
 
 def _get_store():
     global _data_store
     if _data_store is None:
-        try:
-            cfg = _import_config()
-            DataStore = _import_store()
-            _data_store = DataStore(cfg['get_db_path']())
-        except Exception as e:
-            logger.warning(f"Cannot initialize DataStore: {e}")
-            return None
+        with _data_store_lock:
+            if _data_store is None:
+                try:
+                    cfg = _import_config()
+                    DataStore = _import_store()
+                    _data_store = DataStore(cfg['get_db_path']())
+                except Exception as e:
+                    logger.warning(f"Cannot initialize DataStore: {e}")
+                    return None
     return _data_store
 
 
 def _get_collector():
     global _collector
     if _collector is None:
-        try:
-            cfg = _import_config()
-            exchange_cfg = cfg['get_exchange_config']()
-            MarketDataCollector = _import_collector()
-            _collector = MarketDataCollector(
-                _get_store(),
-                testnet=exchange_cfg.get("testnet", True),
-                exchange_id=exchange_cfg.get("id", "binance"),
-            )
-        except Exception as e:
-            logger.warning(f"Cannot initialize MarketDataCollector: {e}")
-            return None
+        with _collector_lock:
+            if _collector is None:
+                try:
+                    cfg = _import_config()
+                    exchange_cfg = cfg['get_exchange_config']()
+                    MarketDataCollector = _import_collector()
+                    _collector = MarketDataCollector(
+                        _get_store(),
+                        testnet=exchange_cfg.get("testnet", True),
+                        exchange_id=exchange_cfg.get("id", "binance"),
+                    )
+                except Exception as e:
+                    logger.warning(f"Cannot initialize MarketDataCollector: {e}")
+                    return None
     return _collector
 
 
 def _get_simulator():
     global _simulator
     if _simulator is None:
-        try:
-            cfg = _import_config()
-            bt = cfg['get_backtest_config']()
-            risk = cfg['get_risk_config']()
-            RiskLimits = _import_risk_limits()
-            PaperTradingSimulator = _import_simulator()
-            limits = RiskLimits(
-                max_position_pct=risk.get("max_position_pct", 0.3),
-                max_total_position_pct=risk.get("max_total_position_pct", 0.8),
-                max_daily_loss_pct=risk.get("max_daily_loss_pct", 0.05),
-                max_consecutive_losses=risk.get("max_consecutive_losses", 3),
-                stop_loss_pct=risk.get("stop_loss_pct", 0.05),
-                take_profit_pct=risk.get("take_profit_pct", 0.10),
-                position_sizing=risk.get("position_sizing", "fixed"),
-            )
-            _simulator = PaperTradingSimulator(
-                initial_capital=bt.get("initial_capital", 10000),
-                risk_limits=limits,
-            )
-        except Exception as e:
-            logger.warning(f"Cannot initialize PaperTradingSimulator: {e}")
-            return None
+        with _simulator_lock:
+            if _simulator is None:
+                try:
+                    cfg = _import_config()
+                    bt = cfg['get_backtest_config']()
+                    risk = cfg['get_risk_config']()
+                    RiskLimits = _import_risk_limits()
+                    PaperTradingSimulator = _import_simulator()
+                    limits = RiskLimits(
+                        max_position_pct=risk.get("max_position_pct", 0.3),
+                        max_total_position_pct=risk.get("max_total_position_pct", 0.8),
+                        max_daily_loss_pct=risk.get("max_daily_loss_pct", 0.05),
+                        max_consecutive_losses=risk.get("max_consecutive_losses", 3),
+                        stop_loss_pct=risk.get("stop_loss_pct", 0.05),
+                        take_profit_pct=risk.get("take_profit_pct", 0.10),
+                        position_sizing=risk.get("position_sizing", "fixed"),
+                    )
+                    _simulator = PaperTradingSimulator(
+                        initial_capital=bt.get("initial_capital", 10000),
+                        risk_limits=limits,
+                    )
+                except Exception as e:
+                    logger.warning(f"Cannot initialize PaperTradingSimulator: {e}")
+                    return None
     return _simulator
 
 
@@ -335,40 +358,44 @@ def _get_live_client():
     if _live_client is not None:
         return _live_client
 
-    try:
-        from execution.client import MultiExchangeClient
-    except ImportError:
-        logger.warning("MultiExchangeClient not available")
-        return None
+    with _live_client_lock:
+        if _live_client is not None:
+            return _live_client
 
-    try:
-        cfg = _import_config()
-        ex_id = cfg['get_exchange_id']()
+        try:
+            from execution.client import MultiExchangeClient
+        except ImportError:
+            logger.warning("MultiExchangeClient not available")
+            return None
 
-        if ex_id == 'okx':
-            exch_cfg = cfg['get_okx_config']()
-            api_key = exch_cfg.get("api_key", "")
-            api_secret = exch_cfg.get("api_secret", "")
-            password = exch_cfg.get("password", "")
-            testnet = exch_cfg.get("testnet", True)
-        else:
-            exch_cfg = cfg['get_binance_config']()
-            api_key = exch_cfg.get("api_key", "")
-            api_secret = exch_cfg.get("api_secret", "")
-            password = ""
-            testnet = exch_cfg.get("testnet", True)
+        try:
+            cfg = _import_config()
+            ex_id = cfg['get_exchange_id']()
 
-        if api_key and api_secret:
-            _live_client = MultiExchangeClient(
-                exchange_id=ex_id,
-                api_key=api_key,
-                api_secret=api_secret,
-                password=password,
-                testnet=testnet,
-            )
-    except Exception as e:
-        logger.warning(f"Cannot initialize live client: {e}")
-        return None
+            if ex_id == 'okx':
+                exch_cfg = cfg['get_okx_config']()
+                api_key = exch_cfg.get("api_key", "")
+                api_secret = exch_cfg.get("api_secret", "")
+                password = exch_cfg.get("password", "")
+                testnet = exch_cfg.get("testnet", True)
+            else:
+                exch_cfg = cfg['get_binance_config']()
+                api_key = exch_cfg.get("api_key", "")
+                api_secret = exch_cfg.get("api_secret", "")
+                password = ""
+                testnet = exch_cfg.get("testnet", True)
+
+            if api_key and api_secret:
+                _live_client = MultiExchangeClient(
+                    exchange_id=ex_id,
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    password=password,
+                    testnet=testnet,
+                )
+        except Exception as e:
+            logger.warning(f"Cannot initialize live client: {e}")
+            return None
 
     return _live_client
 
@@ -376,18 +403,20 @@ def _get_live_client():
 def _get_alert_manager():
     global _alert_manager
     if _alert_manager is None:
-        try:
-            cfg = _import_config()
-            alerts_cfg = cfg['get_alerts_config']()
-            AlertManager = _import_alert_manager()
-            _alert_manager = AlertManager(
-                bot_token=alerts_cfg.get("telegram_bot_token", ""),
-                chat_id=alerts_cfg.get("telegram_chat_id", ""),
-                enabled=alerts_cfg.get("enabled", False),
-            )
-        except Exception as e:
-            logger.warning(f"Cannot initialize AlertManager: {e}")
-            return None
+        with _alert_manager_lock:
+            if _alert_manager is None:
+                try:
+                    cfg = _import_config()
+                    alerts_cfg = cfg['get_alerts_config']()
+                    AlertManager = _import_alert_manager()
+                    _alert_manager = AlertManager(
+                        bot_token=alerts_cfg.get("telegram_bot_token", ""),
+                        chat_id=alerts_cfg.get("telegram_chat_id", ""),
+                        enabled=alerts_cfg.get("enabled", False),
+                    )
+                except Exception as e:
+                    logger.warning(f"Cannot initialize AlertManager: {e}")
+                    return None
     return _alert_manager
 
 
@@ -972,14 +1001,13 @@ async def run_backtest(request: BacktestRequest):
     """Run a backtest."""
     try:
         cfg = _import_config()
+        df = _load_backtest_data(request, cfg)
         result = _run_backtest_core(
             request.strategy, request.symbol, request.interval,
             request.initial_capital or cfg['get_backtest_config']().get('initial_capital', 10000),
             request.params,
-            _load_backtest_data(request, cfg)
+            df
         )
-
-        df = _load_backtest_data(request, cfg)
         actual_start = str(df.index[0].date())
         actual_end = str(df.index[-1].date())
 
@@ -1485,11 +1513,13 @@ async def get_system_status():
 
         traders = scheduler.list_traders() if scheduler else []
         db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+        with _active_bots_lock:
+            active_count = len(active_bots)
 
         return {
             'mode': cfg['get_mode'](),
             'uptime': 'running',
-            'active_bots': len(active_bots),
+            'active_bots': active_count,
             'live_traders': len(traders),
             'trader_list': traders,
             'database_size': db_size,
@@ -1552,10 +1582,15 @@ async def quick_start():
         )
 
         bot_id = f"quick_{symbol}_{interval}"
-        active_bots[bot_id] = trader
+        with _active_bots_lock:
+            active_bots[bot_id] = trader
 
         import asyncio
-        asyncio.create_task(trader.start())
+        task = asyncio.create_task(trader.start())
+        # Store task reference to prevent garbage collection and allow error monitoring
+        with _active_bots_lock:
+            if bot_id in active_bots:
+                active_bots[bot_id] = (trader, task)
 
         return {
             "success": True,
@@ -1580,8 +1615,12 @@ async def get_live_status():
     """Get status of all live trading bots."""
     try:
         bots_status = {}
-        for bot_id, trader in active_bots.items():
+        with _active_bots_lock:
+            bots_copy = dict(active_bots)
+        for bot_id, bot_entry in bots_copy.items():
             try:
+                # bot_entry can be a trader or a (trader, task) tuple
+                trader = bot_entry[0] if isinstance(bot_entry, tuple) else bot_entry
                 if hasattr(trader, 'status'):
                     bots_status[bot_id] = trader.status
                 else:
@@ -1610,14 +1649,15 @@ async def stop_live_trader(request: dict):
         if not bot_id:
             return {"error": "缺少bot_id", "detail": "bot_id or name is required"}
 
-        trader = active_bots.get(bot_id)
-        if not trader:
+        with _active_bots_lock:
+            bot_entry = active_bots.pop(bot_id, None)
+        if not bot_entry:
             return {"error": "未找到机器人", "detail": f"Bot '{bot_id}' not found"}
 
         try:
+            trader = bot_entry[0] if isinstance(bot_entry, tuple) else bot_entry
             if hasattr(trader, 'stop'):
                 await trader.stop()
-            del active_bots[bot_id]
             return {"success": True, "bot_id": bot_id}
         except Exception as e:
             return {"error": "停止失败", "detail": str(e)}
@@ -1838,7 +1878,7 @@ async def dashboard_snapshot(symbol: str = Query(default="BTCUSDT"), interval: s
                 sim = _get_simulator()
                 if sim is None: return {"total_equity": 0, "capital": 0, "positions": []}
                 return sim.get_account_summary()
-            except: return {"error": "account unavailable"}
+            except Exception: return {"error": "account unavailable"}
         
         async def get_klines():
             try:
@@ -1849,7 +1889,7 @@ async def dashboard_snapshot(symbol: str = Query(default="BTCUSDT"), interval: s
                 return [{"time": str(i[0]), "open": float(i[1]), "high": float(i[2]), 
                          "low": float(i[3]), "close": float(i[4]), "volume": float(i[5])} 
                         for i in df.itertuples()][:200]
-            except: return []
+            except Exception: return []
         
         account, klines = await asyncio.gather(get_account(), get_klines())
         return {"account": account, "klines": klines, "symbol": symbol, "interval": interval}

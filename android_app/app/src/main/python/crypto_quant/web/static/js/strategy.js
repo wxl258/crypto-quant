@@ -37,6 +37,12 @@ function getStrategyLabel(name) {
 async function loadStrategies() {
     try {
         const data = await API.get('/api/strategies');
+        if (!data || !Array.isArray(data.strategies)) {
+            console.warn('Invalid strategies data:', data);
+            window._allStrategies = [];
+            renderStrategyCards([]);
+            return;
+        }
         // Cache defs for later use
         window._strategyDefs = {};
         for (const s of data.strategies) {
@@ -98,7 +104,7 @@ function renderStrategyCards(strategies) {
         const icon = guide ? guide.icon : '📈';
         const description = guide ? guide.description : (s.description || '暂无描述');
         const difficulty = guide ? guide.difficulty : '';
-        const diffColor = difficulty ? (DIFFICULTY_COLORS[difficulty] || '#888') : '#888';
+        const diffColor = difficulty ? ((typeof DIFFICULTY_COLORS !== 'undefined' ? DIFFICULTY_COLORS[difficulty] : undefined) || '#888') : '#888';
         const tips = guide ? guide.tips : '';
         const suitable = guide ? guide.suitable : '';
         const unsuitable = guide ? guide.unsuitable : '';
@@ -144,18 +150,25 @@ function renderStrategyCards(strategies) {
 
 function showStrategyModal(name) {
     const overlay = document.getElementById('strategy-overlay');
-    if (name) document.getElementById('modal-strategy').value = name;
+    if (!overlay) return;
+    if (name) {
+        const modalStrategy = document.getElementById('modal-strategy');
+        if (modalStrategy) modalStrategy.value = name;
+    }
     overlay.style.display = 'flex';
     updateModalParams();
 }
 
 function closeStrategyModal() {
-    document.getElementById('strategy-overlay').style.display = 'none';
+    const overlay = document.getElementById('strategy-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 async function updateModalParams() {
-    const name = document.getElementById('modal-strategy').value;
+    const modalStrategy = document.getElementById('modal-strategy');
     const container = document.getElementById('modal-params');
+    if (!modalStrategy || !container) return;
+    const name = modalStrategy.value;
 
     // 显示策略说明（如果有）
     const guide = (typeof STRATEGY_GUIDE !== 'undefined' && STRATEGY_GUIDE[name]) || null;
@@ -163,7 +176,7 @@ async function updateModalParams() {
     if (guide) {
         guideHtml = `
             <div class="strategy-guide-box">
-                <div class="guide-title">${guide.icon} ${guide.name} <span style="color:${DIFFICULTY_COLORS[guide.difficulty] || '#888'}">${guide.difficulty}</span></div>
+                <div class="guide-title">${guide.icon} ${guide.name} <span style="color:${(typeof DIFFICULTY_COLORS !== 'undefined' ? DIFFICULTY_COLORS[guide.difficulty] : undefined) || '#888'}">${guide.difficulty}</span></div>
                 <div class="guide-desc">${guide.description}</div>
                 ${guide.tips ? `<div class="guide-tips">💡 ${guide.tips}</div>` : ''}
             </div>`;
@@ -214,8 +227,14 @@ async function updateModalParams() {
 document.getElementById('modal-strategy')?.addEventListener('change', updateModalParams);
 
 async function createStrategy() {
-    const strategy = document.getElementById('modal-strategy').value;
-    const symbol = document.getElementById('modal-symbol').value;
+    const modalStrategy = document.getElementById('modal-strategy');
+    const modalSymbol = document.getElementById('modal-symbol');
+    if (!modalStrategy || !modalSymbol) {
+        showToast('页面元素缺失，请刷新后重试', 'error');
+        return;
+    }
+    const strategy = modalStrategy.value;
+    const symbol = modalSymbol.value;
 
     // Collect params from modal
     const params = {};

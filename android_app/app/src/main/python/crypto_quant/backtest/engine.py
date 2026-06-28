@@ -64,9 +64,13 @@ class BacktestEngine:
         window_high = high[max(0,i-13):i+1]
         window_low = low[max(0,i-13):i+1]
         window_close = close[max(0,i-13):i+1]
-        tr = np.maximum(window_high - window_low,
-                       np.maximum(np.abs(window_high - np.roll(window_close, 1)),
-                                  np.abs(window_low - np.roll(window_close, 1))))
+        # Compute True Range using prior close (shifted right, not rolled — no future data)
+        tr = np.zeros(len(window_high))
+        tr[0] = window_high[0] - window_low[0]
+        for j in range(1, len(window_high)):
+            tr[j] = max(window_high[j] - window_low[j],
+                       abs(window_high[j] - window_close[j-1]),
+                       abs(window_low[j] - window_close[j-1]))
         atr = np.mean(tr[-14:]) if len(tr) >= 14 else tr[-1]
         
         vol_ratio = atr / price if price > 0 else 0
@@ -237,13 +241,13 @@ class BacktestEngine:
             if signal.signal_type == SignalType.BUY and position == 0:
                 # Cooldown check + RiskManager check
                 if not strategy.can_enter(i):
-                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
+                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': 0})
                     continue
                 # RiskManager: check if position can be opened
                 risk_manager.set_capital(capital)
                 allowed, reason = risk_manager.can_open_position(symbol, "LONG")
                 if not allowed:
-                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
+                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': 0})
                     continue
                 # Open long
                 entry_price = price * (1 + sl)
@@ -269,12 +273,12 @@ class BacktestEngine:
 
             elif signal.signal_type == SignalType.SELL and position == 0:
                 if not strategy.can_enter(i):
-                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
+                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': 0})
                     continue
                 risk_manager.set_capital(capital)
                 allowed, reason = risk_manager.can_open_position(symbol, "SHORT")
                 if not allowed:
-                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
+                    equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': 0})
                     continue
                 # Open short
                 entry_price = price * (1 - sl)
@@ -302,16 +306,24 @@ class BacktestEngine:
                 pnl = (exit_price - entry_price) * position_size
                 fee = position_size * exit_price * self.commission
                 capital += pnl - fee
-                trades[-1].update({
-                    'exit_time': timestamp, 'exit_price': exit_price,
-                    'pnl': round(pnl - fee, 2),
-                    'pnl_pct': round((exit_price / entry_price - 1) * 100 * leverage, 2),
-                })
+                if trades:
+                    trades[-1].update({
+                        'exit_time': timestamp, 'exit_price': exit_price,
+                        'pnl': round(pnl - fee, 2),
+                        'pnl_pct': round((exit_price / entry_price - 1) * 100 * leverage, 2),
+                    })
                 position = 0
                 position_size = 0
                 strategy.set_position(position, 0)
                 strategy.record_exit(i)
                 risk_manager.close_position(symbol, exit_price)
+                # Track consecutive wins/losses on close
+                if pnl - fee > 0:
+                    consecutive_wins = min(consecutive_wins + 1, 10)
+                    consecutive_losses = 0
+                else:
+                    consecutive_losses = min(consecutive_losses + 1, 10)
+                    consecutive_wins = 0
 
             elif signal.signal_type == SignalType.CLOSE_SHORT and position == -1:
                 # Close short
@@ -319,16 +331,24 @@ class BacktestEngine:
                 pnl = (entry_price - exit_price) * position_size
                 fee = position_size * exit_price * self.commission
                 capital += pnl - fee
-                trades[-1].update({
-                    'exit_time': timestamp, 'exit_price': exit_price,
-                    'pnl': round(pnl - fee, 2),
-                    'pnl_pct': round((1 - exit_price / entry_price) * 100 * leverage, 2),
-                })
+                if trades:
+                    trades[-1].update({
+                        'exit_time': timestamp, 'exit_price': exit_price,
+                        'pnl': round(pnl - fee, 2),
+                        'pnl_pct': round((1 - exit_price / entry_price) * 100 * leverage, 2),
+                    })
                 position = 0
                 position_size = 0
                 strategy.set_position(position, 0)
                 strategy.record_exit(i)
                 risk_manager.close_position(symbol, exit_price)
+                # Track consecutive wins/losses on close
+                if pnl - fee > 0:
+                    consecutive_wins = min(consecutive_wins + 1, 10)
+                    consecutive_losses = 0
+                else:
+                    consecutive_losses = min(consecutive_losses + 1, 10)
+                    consecutive_wins = 0
 
             # Check signal-level stop-loss and take-profit (engine-enforced)
             if position != 0 and signal.stop_loss and signal.stop_loss > 0:
@@ -346,6 +366,12 @@ class BacktestEngine:
                     position_size = 0
                     strategy.set_position(0, 0)
                     strategy.record_exit(i)
+                    if pnl - fee > 0:
+                        consecutive_wins = min(consecutive_wins + 1, 10)
+                        consecutive_losses = 0
+                    else:
+                        consecutive_losses = min(consecutive_losses + 1, 10)
+                        consecutive_wins = 0
                 elif position == -1 and price >= signal.stop_loss:
                     pnl = (entry_price - signal.stop_loss) * position_size
                     fee = position_size * signal.stop_loss * self.commission
@@ -360,6 +386,12 @@ class BacktestEngine:
                     position_size = 0
                     strategy.set_position(0, 0)
                     strategy.record_exit(i)
+                    if pnl - fee > 0:
+                        consecutive_wins = min(consecutive_wins + 1, 10)
+                        consecutive_losses = 0
+                    else:
+                        consecutive_losses = min(consecutive_losses + 1, 10)
+                        consecutive_wins = 0
 
             if position != 0 and signal.take_profit and signal.take_profit > 0:
                 if position == 1 and price >= signal.take_profit:
@@ -376,6 +408,12 @@ class BacktestEngine:
                     position_size = 0
                     strategy.set_position(0, 0)
                     strategy.record_exit(i)
+                    if pnl - fee > 0:
+                        consecutive_wins = min(consecutive_wins + 1, 10)
+                        consecutive_losses = 0
+                    else:
+                        consecutive_losses = min(consecutive_losses + 1, 10)
+                        consecutive_wins = 0
                 elif position == -1 and price <= signal.take_profit:
                     pnl = (entry_price - signal.take_profit) * position_size
                     fee = position_size * signal.take_profit * self.commission
@@ -390,6 +428,12 @@ class BacktestEngine:
                     position_size = 0
                     strategy.set_position(0, 0)
                     strategy.record_exit(i)
+                    if pnl - fee > 0:
+                        consecutive_wins = min(consecutive_wins + 1, 10)
+                        consecutive_losses = 0
+                    else:
+                        consecutive_losses = min(consecutive_losses + 1, 10)
+                        consecutive_wins = 0
 
             # ============ DYNAMIC TRAILING STOP (engine-level) ============
             # Lock ATR at entry; trail stop as price moves favorably
@@ -438,6 +482,12 @@ class BacktestEngine:
                         strategy.record_exit(i)
                         trailing_stop_long = 0.0
                         atr_locked = 0.0
+                        if pnl - fee > 0:
+                            consecutive_wins = min(consecutive_wins + 1, 10)
+                            consecutive_losses = 0
+                        else:
+                            consecutive_losses = min(consecutive_losses + 1, 10)
+                            consecutive_wins = 0
 
                 elif position == -1:
                     if trailing_stop_short == float('inf') and atr_val > 0:
@@ -466,6 +516,12 @@ class BacktestEngine:
                         strategy.record_exit(i)
                         trailing_stop_short = float('inf')
                         atr_locked = 0.0
+                        if pnl - fee > 0:
+                            consecutive_wins = min(consecutive_wins + 1, 10)
+                            consecutive_losses = 0
+                        else:
+                            consecutive_losses = min(consecutive_losses + 1, 10)
+                            consecutive_wins = 0
 
             # ============ DYNAMIC LEVERAGE (drawdown-based) ============
             current_equity_check = capital
@@ -493,23 +549,7 @@ class BacktestEngine:
             else:
                 leverage = base_leverage
 
-            # Track consecutive wins/losses (updated when position closes)
-            # This is done in the close branches above via pnl tracking
-            # We use the trades list to track
-            if len(trades) >= 2:
-                last_closed = [t for t in trades if 'pnl' in t]
-                if len(last_closed) >= 2:
-                    prev = last_closed[-2]['pnl']
-                    curr = last_closed[-1]['pnl']
-                    if prev > 0 and curr > 0:
-                        consecutive_wins = min(consecutive_wins + 1, 10)
-                        consecutive_losses = 0
-                    elif prev < 0 and curr < 0:
-                        consecutive_losses = min(consecutive_losses + 1, 10)
-                        consecutive_wins = 0
-                    else:
-                        consecutive_wins = 1 if curr > 0 else 0
-                        consecutive_losses = 1 if curr < 0 else 0
+            # Track consecutive wins/losses is now done in each close branch above
 
             # Calculate current equity (including unrealized PnL)
             unrealized = 0

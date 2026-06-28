@@ -1,10 +1,18 @@
 """
 数据存储 — 从SQLite数据库加载OHLCV数据
 """
+import re
 import sqlite3
 import pandas as pd
 from pathlib import Path
 from typing import Optional
+
+
+def _sanitize_table_name(symbol: str, interval: str) -> str:
+    """Sanitize symbol and interval for safe table name construction."""
+    safe_symbol = re.sub(r'[^a-zA-Z0-9_]', '', symbol)
+    safe_interval = re.sub(r'[^a-zA-Z0-9_]', '', interval)
+    return f"klines_{safe_symbol}_{safe_interval}"
 
 
 class DataStore:
@@ -15,15 +23,17 @@ class DataStore:
     
     def load_ohlcv(self, symbol: str, interval: str, limit: int = 200) -> Optional[pd.DataFrame]:
         """从数据库加载OHLCV数据"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_path)
-            table_name = f"klines_{symbol}_{interval}"
+            table_name = _sanitize_table_name(symbol, interval)
+            # Ensure limit is a safe positive integer
+            safe_limit = max(1, min(int(limit), 10000))
             df = pd.read_sql_query(
                 f"SELECT open_time, open, high, low, close, volume FROM \"{table_name}\" "
-                f"ORDER BY open_time DESC LIMIT {limit}",
+                f"ORDER BY open_time DESC LIMIT {safe_limit}",
                 conn
             )
-            conn.close()
             if df.empty:
                 return None
             # 按时间升序排列
@@ -31,6 +41,9 @@ class DataStore:
             return df
         except Exception:
             return None
+        finally:
+            if conn is not None:
+                conn.close()
     
     def save_ohlcv(self, symbol: str, interval: str, df: pd.DataFrame):
         """保存OHLCV数据到数据库，自动去重"""
@@ -54,7 +67,7 @@ class DataStore:
             
             conn = sqlite3.connect(self.db_path)
             try:
-                table_name = f"klines_{symbol}_{interval}"
+                table_name = _sanitize_table_name(symbol, interval)
                 df.to_sql(table_name, conn, if_exists='append', index=False)
                 # 删除重复时间点，保留最早插入的
                 conn.execute(f'''

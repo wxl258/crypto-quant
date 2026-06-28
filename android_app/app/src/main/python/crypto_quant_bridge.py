@@ -30,6 +30,7 @@ _server_ready = threading.Event()
 # Error propagation event — set when uvicorn crashes
 _server_error = threading.Event()
 _server_error_msg = None
+_server_error_lock = threading.Lock()
 
 
 def init_paths():
@@ -76,6 +77,13 @@ def start_server(port=8000):
         global _server_error_msg
         try:
             import uvicorn
+        except ImportError as e:
+            logger.error(f"uvicorn not available: {e}")
+            with _server_error_lock:
+                _server_error_msg = str(e)
+            _server_error.set()
+            return
+        try:
             config = uvicorn.Config(
                 fastapi_app,
                 host="127.0.0.1",
@@ -84,14 +92,15 @@ def start_server(port=8000):
                 loop="asyncio",
             )
             server = uvicorn.Server(config)
-            # Signal Kotlin that the server is about to start
+            # Signal Kotlin that the server is about to start listening
             _server_ready.set()
             logger.info(f"Starting uvicorn on 127.0.0.1:{port}...")
             server.run()
         except Exception as e:
             logger.error(f"SERVER CRASH: {e}")
             logger.error(traceback.format_exc())
-            _server_error_msg = str(e)
+            with _server_error_lock:
+                _server_error_msg = str(e)
             _server_error.set()
 
     t = threading.Thread(target=_run_server, daemon=True)

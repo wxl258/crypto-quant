@@ -43,12 +43,15 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
     if trading_days > 0:
         years = trading_days / 365.25
         if total_return > -1 and years > 0:
-            annual_return = (1 + total_return) ** (1 / years) - 1
+            try:
+                annual_return = (1 + total_return) ** (1 / years) - 1
+            except (ValueError, OverflowError):
+                annual_return = float('nan')
         else:
-            annual_return = -1 if total_return <= -1 else 0
+            annual_return = float('nan') if total_return <= -1 else 0
     else:
         annual_return = 0
-    metrics['annual_return'] = round(annual_return * 100, 2)
+    metrics['annual_return'] = round(annual_return * 100, 2) if not (isinstance(annual_return, float) and (annual_return != annual_return)) else 0
     
     # Sharpe Ratio — annualization factor depends on candle interval
     returns = equity_curve.pct_change().dropna()
@@ -122,7 +125,7 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
         
         total_profit = winning['pnl'].sum() if not winning.empty else 0
         total_loss = abs(losing['pnl'].sum()) if not losing.empty else 0
-        metrics['profit_factor'] = round(total_profit / total_loss, 2) if total_loss > 0 else None
+        metrics['profit_factor'] = round(total_profit / total_loss, 2) if total_loss > 0 else (999.99 if total_profit > 0 else 0)
         
         metrics['avg_win'] = round(winning['pnl'].mean(), 2) if not winning.empty else 0
         metrics['avg_loss'] = round(losing['pnl'].mean(), 2) if not losing.empty else 0
@@ -130,8 +133,11 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
         metrics['worst_trade'] = round(trades['pnl'].min(), 2)
     
     # Calmar Ratio
-    if max_dd != 0:
-        metrics['calmar_ratio'] = round(annual_return / abs(max_dd), 2)
+    if max_dd != 0 and not (isinstance(annual_return, float) and (annual_return != annual_return)):
+        try:
+            metrics['calmar_ratio'] = round(annual_return / abs(max_dd), 2)
+        except (ZeroDivisionError, OverflowError):
+            metrics['calmar_ratio'] = 0
     else:
         metrics['calmar_ratio'] = 0
     

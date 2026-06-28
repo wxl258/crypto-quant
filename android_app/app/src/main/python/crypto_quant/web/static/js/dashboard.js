@@ -191,12 +191,8 @@ function loadKlineChart() {
     var activeBtn  = safeGet('.chart-controls .btn-sm.active');
     var interval   = (activeBtn && activeBtn.dataset) ? (activeBtn.dataset.interval || '1h') : '1h';
 
-    // 如果图表已存在且symbol/interval相同，只更新数据
+    // 如果图表已存在且symbol/interval相同，跳过重建
     if (klineChart && _lastKlineSymbol === symbol && _lastKlineInterval === interval) {
-        // update series data only
-        if (candlestickSeries && data && data.length > 0) {
-            candlestickSeries.setData(data.map(function(d) { return { time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }; }));
-        }
         return;
     }
     _lastKlineSymbol = symbol;
@@ -567,7 +563,7 @@ function buildEquityCurve(account, trades) {
 
 (function() {
     var buttons = document.querySelectorAll('.chart-controls .btn-sm');
-    if (!buttons) return;
+    if (!buttons || buttons.length === 0) return;
     for (var i = 0; i < buttons.length; i++) {
         buttons[i].addEventListener('click', function() {
             var all = document.querySelectorAll('.chart-controls .btn-sm');

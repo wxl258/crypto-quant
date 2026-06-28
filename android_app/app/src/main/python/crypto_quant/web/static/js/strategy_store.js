@@ -30,7 +30,7 @@ async function loadStrategyStore() {
         // Batch fetch info for all strategies
         var names = strategies.map(function(s) { return typeof s === 'string' ? s : s.name; });
         var batchResp = await API.post('/api/strategies/admin/info/batch', {names: names});
-        var infoMap = batchResp.strategies || {};
+        var infoMap = (batchResp && batchResp.strategies) ? batchResp.strategies : {};
 
         const rows = [];
         for (const name of strategies) {
@@ -92,8 +92,8 @@ async function loadStrategyStore() {
 
 // ── 热重载 ──
 
-async function hotReloadStrategies() {
-    const btn = event?.target?.closest('button');
+async function hotReloadStrategies(e) {
+    const btn = (e && e.target) ? e.target.closest('button') : null;
     if (btn) {
         btn.disabled = true;
         btn.textContent = '⏳ 重载中...';
@@ -101,12 +101,12 @@ async function hotReloadStrategies() {
 
     try {
         const result = await API.post('/api/strategies/admin/reload', {});
-        const msg = result.success 
-            ? `热重载成功！已加载 ${result.count} 个策略`
-            : `部分重载失败: ${result.errors.length} 个错误`;
-        showToast(msg, result.success ? 'success' : 'error');
+        const msg = result && result.success 
+            ? `热重载成功！已加载 ${result.count || 0} 个策略`
+            : `部分重载失败: ${(result && result.errors && result.errors.length) || 0} 个错误`;
+        showToast(msg, (result && result.success) ? 'success' : 'error');
         
-        if (result.errors && result.errors.length > 0) {
+        if (result && result.errors && result.errors.length > 0) {
             console.warn('Reload errors:', result.errors);
         }
         
@@ -124,18 +124,26 @@ async function hotReloadStrategies() {
 // ── 从URL安装 ──
 
 function showDownloadModal() {
-    document.getElementById('download-overlay').style.display = 'flex';
-    document.getElementById('download-url').value = '';
-    document.getElementById('download-sha256').value = '';
+    const overlay = document.getElementById('download-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    const urlEl = document.getElementById('download-url');
+    if (urlEl) urlEl.value = '';
+    const sha256El = document.getElementById('download-sha256');
+    if (sha256El) sha256El.value = '';
 }
 
 function closeDownloadModal() {
-    document.getElementById('download-overlay').style.display = 'none';
+    const overlay = document.getElementById('download-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 async function downloadStrategy() {
-    const url = document.getElementById('download-url').value.trim();
-    const sha256 = document.getElementById('download-sha256').value.trim();
+    const urlEl = document.getElementById('download-url');
+    const sha256El = document.getElementById('download-sha256');
+    if (!urlEl || !sha256El) return;
+    const url = urlEl.value.trim();
+    const sha256 = sha256El.value.trim();
 
     if (!url) {
         showToast('请输入策略文件URL', 'error');
@@ -143,6 +151,7 @@ async function downloadStrategy() {
     }
 
     const btn = document.querySelector('#download-overlay .btn-primary');
+    if (!btn) return;
     btn.disabled = true;
     btn.textContent = '⏳ 下载中...';
 
@@ -196,6 +205,7 @@ async function viewStrategySource(name) {
     const overlay = document.getElementById('source-overlay');
     const title = document.getElementById('source-modal-title');
     const content = document.getElementById('source-content');
+    if (!overlay || !title || !content) return;
 
     overlay.style.display = 'flex';
     title.textContent = `策略源码: ${name}`;
@@ -210,7 +220,8 @@ async function viewStrategySource(name) {
 }
 
 function closeSourceModal() {
-    document.getElementById('source-overlay').style.display = 'none';
+    const overlay = document.getElementById('source-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 // ── 模板 ──
@@ -218,6 +229,7 @@ function closeSourceModal() {
 async function getStrategyTemplate() {
     const overlay = document.getElementById('template-overlay');
     const content = document.getElementById('template-content');
+    if (!overlay || !content) return;
 
     overlay.style.display = 'flex';
     content.textContent = '加载中...';
@@ -231,11 +243,18 @@ async function getStrategyTemplate() {
 }
 
 function closeTemplateModal() {
-    document.getElementById('template-overlay').style.display = 'none';
+    const overlay = document.getElementById('template-overlay');
+    if (overlay) overlay.style.display = 'none';
 }
 
 function copyTemplate() {
-    const content = document.getElementById('template-content').textContent;
+    const contentEl = document.getElementById('template-content');
+    if (!contentEl) return;
+    const content = contentEl.textContent;
+    if (!navigator.clipboard) {
+        showToast('剪贴板不可用，请手动复制', 'error');
+        return;
+    }
     navigator.clipboard.writeText(content).then(() => {
         showToast('模板已复制到剪贴板', 'success');
     }).catch(() => {

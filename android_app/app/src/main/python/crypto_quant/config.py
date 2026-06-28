@@ -10,10 +10,12 @@ Examples:
 """
 import os
 import yaml
+import threading
 from pathlib import Path
 from typing import Any, Dict, List
 
 _CONFIG = None
+_CONFIG_LOCK = threading.Lock()
 
 
 def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -21,23 +23,36 @@ def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in os.environ.items():
         if not key.startswith("CQ_"):
             continue
-        parts = key[3:].lower().split("_", 1)
-        if len(parts) != 2:
-            continue
-        section, field = parts
-        if section in config and isinstance(config[section], dict):
-            env_val = value
-            # Try type coercion: bool, int, float, else keep as str
-            if env_val.lower() in ("true", "false"):
-                env_val = env_val.lower() == "true"
-            elif env_val.isdigit():
-                env_val = int(env_val)
-            else:
-                try:
-                    env_val = float(env_val)
-                except ValueError:
-                    pass
+        # Split into at most 2 parts: section and field
+        # CQ_MODE → ["mode"] (top-level key)
+        # CQ_RISK_MAX_POSITION_PCT → ["risk", "max_position_pct"]
+        remainder = key[3:].lower()
+        parts = remainder.split("_", 1)
+        if len(parts) == 1:
+            # Single-segment: top-level config key (e.g., CQ_MODE)
+            section, field = None, parts[0]
+        else:
+            section, field = parts
+
+        env_val = value
+        # Try type coercion: bool, int, float, else keep as str
+        if env_val.lower() in ("true", "false"):
+            env_val = env_val.lower() == "true"
+        elif env_val.isdigit():
+            env_val = int(env_val)
+        else:
+            try:
+                env_val = float(env_val)
+            except ValueError:
+                pass
+
+        if section is None:
+            # Top-level key
+            config[field] = env_val
+        elif section in config and isinstance(config[section], dict):
             config[section][field] = env_val
+        elif section not in config:
+            config[section] = {field: env_val}
     return config
 
 
@@ -103,10 +118,12 @@ def _load_config() -> Dict[str, Any]:
 
 
 def get_config() -> Dict[str, Any]:
-    """Return the full configuration dictionary (lazy-loaded, cached)."""
+    """Return the full configuration dictionary (lazy-loaded, cached, thread-safe)."""
     global _CONFIG
     if _CONFIG is None:
-        _CONFIG = _load_config()
+        with _CONFIG_LOCK:
+            if _CONFIG is None:
+                _CONFIG = _load_config()
     return _CONFIG
 
 
@@ -162,31 +179,35 @@ def get_timezone() -> str:
 
 
 _DB_PATH_CACHE = None
+_DB_PATH_LOCK = threading.Lock()
 
 
 def get_db_path() -> str:
     global _DB_PATH_CACHE
     if _DB_PATH_CACHE is not None:
         return _DB_PATH_CACHE
-    raw = get_data_config().get("db_path", "data/market.db")
-    if not os.path.isabs(raw):
-        # Android: use app private storage directory
-        try:
-            from android.storage import app_storage_path
-            base = app_storage_path()
-            result = os.path.join(base, raw)
-            os.makedirs(os.path.dirname(result), exist_ok=True)
-            _DB_PATH_CACHE = result
-            return result
-        except (ImportError, Exception):
-            # Use HOME directory (Chaquopy standard on Android)
-            home = os.environ.get("HOME", str(Path(__file__).parent))
-            # 简化路径，直接用 market.db
-            result = os.path.join(home, "market.db")
-            _DB_PATH_CACHE = result
-            return result
-    _DB_PATH_CACHE = raw
-    return raw
+    with _DB_PATH_LOCK:
+        if _DB_PATH_CACHE is not None:
+            return _DB_PATH_CACHE
+        raw = get_data_config().get("db_path", "data/market.db")
+        if not os.path.isabs(raw):
+            # Android: use app private storage directory
+            try:
+                from android.storage import app_storage_path
+                base = app_storage_path()
+                result = os.path.join(base, raw)
+                os.makedirs(os.path.dirname(result), exist_ok=True)
+                _DB_PATH_CACHE = result
+                return result
+            except (ImportError, Exception):
+                # Use HOME directory (Chaquopy standard on Android)
+                home = os.environ.get("HOME", str(Path(__file__).parent))
+                # 简化路径，直接用 market.db
+                result = os.path.join(home, "market.db")
+                _DB_PATH_CACHE = result
+                return result
+        _DB_PATH_CACHE = raw
+        return raw
 
 
 def get_trading_symbols() -> List[str]:

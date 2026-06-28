@@ -1,8 +1,12 @@
 # Strategy package — lazy-loads built-in strategies on demand
 import logging
+import threading
 logger = logging.getLogger(__name__)
 
 from strategy.base import StrategyRegistry
+
+# Thread lock for lazy-loading to prevent race conditions
+_lazy_load_lock = threading.Lock()
 
 # Lazy-load registry: maps strategy name → (module_path, class_name)
 _lazy_strategies = [
@@ -40,20 +44,25 @@ _lazy_map = {name: (module, class_name) for name, module, class_name in _lazy_st
 _original_get = StrategyRegistry.get
 
 def _lazy_get(name: str):
-    """Lazy-load a strategy class on first access."""
+    """Lazy-load a strategy class on first access. Thread-safe."""
     cls = _original_get(name)
     if cls is not None:
         return cls
-    # Not yet loaded — try lazy import
+    # Not yet loaded — try lazy import (under lock)
     if name in _lazy_map:
-        module_path, class_name = _lazy_map[name]
-        try:
-            mod = __import__(module_path, fromlist=[class_name])
-            cls = getattr(mod, class_name)
-            StrategyRegistry.register(name, cls)
-            return cls
-        except Exception as e:
-            logger.warning(f"Strategy '{name}' failed to lazy-load: {e}")
+        with _lazy_load_lock:
+            # Double-check after acquiring lock
+            cls = _original_get(name)
+            if cls is not None:
+                return cls
+            module_path, class_name = _lazy_map[name]
+            try:
+                mod = __import__(module_path, fromlist=[class_name])
+                cls = getattr(mod, class_name)
+                StrategyRegistry.register(name, cls)
+                return cls
+            except Exception as e:
+                logger.warning(f"Strategy '{name}' failed to lazy-load: {e}")
     return None
 
 StrategyRegistry.get = classmethod(_lazy_get)

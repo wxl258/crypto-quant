@@ -4,6 +4,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/strategies/admin", tags=["strategy-admin"])
 
@@ -14,13 +17,34 @@ class DownloadRequest(BaseModel):
 class ToggleRequest(BaseModel):
     name: str
 
+# ── Helper: safe import of strategy manager ──
+
+def _get_strategy_manager():
+    """Safely import and return the strategy manager, or None if unavailable."""
+    try:
+        from strategy.manager import get_strategy_manager
+        return get_strategy_manager()
+    except ImportError as e:
+        logger.warning(f"Strategy manager not available: {e}")
+        return None
+
+def _get_strategy_registry():
+    """Safely import and return the StrategyRegistry, or None if unavailable."""
+    try:
+        from strategy import StrategyRegistry
+        return StrategyRegistry
+    except ImportError as e:
+        logger.warning(f"StrategyRegistry not available: {e}")
+        return None
+
 # ── 热重载 ──
 
 @router.post("/reload")
 async def hot_reload():
     """热重载所有策略（不会中断正在运行的交易）"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     loaded, errors = mgr.hot_reload_all()
     return {
         "success": len(errors) == 0,
@@ -34,8 +58,9 @@ async def hot_reload():
 @router.post("/download")
 async def download_strategy(req: DownloadRequest):
     """从URL下载并加载策略"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     success, msg = mgr.download_strategy(req.url, req.sha256 or "")
     if not success:
         raise HTTPException(400, msg)
@@ -46,8 +71,9 @@ async def download_strategy(req: DownloadRequest):
 @router.post("/disable")
 async def disable_strategy(req: ToggleRequest):
     """禁用策略"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     success, msg = mgr.disable_strategy(req.name)
     if not success:
         raise HTTPException(400, msg)
@@ -56,8 +82,9 @@ async def disable_strategy(req: ToggleRequest):
 @router.post("/enable")
 async def enable_strategy(req: ToggleRequest):
     """启用策略"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     success, msg = mgr.enable_strategy(req.name)
     if not success:
         raise HTTPException(400, msg)
@@ -68,8 +95,9 @@ async def enable_strategy(req: ToggleRequest):
 @router.post("/delete")
 async def delete_strategy(req: ToggleRequest):
     """删除自定义策略"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     success, msg = mgr.delete_strategy(req.name)
     if not success:
         raise HTTPException(400, msg)
@@ -80,8 +108,9 @@ async def delete_strategy(req: ToggleRequest):
 @router.get("/source/{name}")
 async def get_strategy_source(name: str):
     """获取策略源码"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     source = mgr.get_strategy_source(name)
     if source is None:
         raise HTTPException(404, "策略不存在或无法获取源码")
@@ -92,8 +121,9 @@ async def get_strategy_source(name: str):
 @router.get("/info/{name}")
 async def get_strategy_detail(name: str):
     """获取策略详细信息（含元数据）"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     info = mgr.get_strategy_info(name)
     if info is None:
         raise HTTPException(404, f"策略 '{name}' 不存在")
@@ -104,8 +134,9 @@ async def get_strategy_detail(name: str):
 @router.get("/discover")
 async def discover_strategies():
     """自动发现所有可用策略"""
-    from strategy.manager import get_strategy_manager
-    mgr = get_strategy_manager()
+    mgr = _get_strategy_manager()
+    if mgr is None:
+        raise HTTPException(503, "策略管理器不可用")
     names = mgr.discover_strategies()
     return {"strategies": names, "count": len(names)}
 
@@ -175,16 +206,20 @@ async def get_strategies_info_batch(request: dict = None):
             request = {}
         names = request.get('names', [])
         if not names:
-            from strategy import StrategyRegistry
+            StrategyRegistry = _get_strategy_registry()
+            if StrategyRegistry is None:
+                return {"error": "StrategyRegistry不可用"}
             names = [s['name'] for s in StrategyRegistry.list_strategies()]
         
-        from strategy.manager import get_strategy_manager
-        mgr = get_strategy_manager()
+        mgr = _get_strategy_manager()
         results = {}
         for name in names:
             try:
-                info = mgr.get_strategy_info(name) if hasattr(mgr, 'get_strategy_info') else None
-                results[name] = info if info else {"name": name, "status": "unavailable"}
+                if mgr is not None and hasattr(mgr, 'get_strategy_info'):
+                    info = mgr.get_strategy_info(name)
+                    results[name] = info if info else {"name": name, "status": "unavailable"}
+                else:
+                    results[name] = {"name": name, "status": "unavailable"}
             except Exception:
                 results[name] = {"name": name, "status": "error"}
         return {"strategies": results}

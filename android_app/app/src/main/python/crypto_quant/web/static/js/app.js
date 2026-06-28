@@ -309,21 +309,6 @@ function updateTickerFromWS(msg) {
  * SECTION 6 – Format helpers (defensive: guard null/undefined)
  * ========================================================================== */
 
-function fmtUSD(n) {
-    if (n === undefined || n === null) return '--';
-    return Number(n).toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-}
-
-function fmtPct(n) {
-    if (n === undefined || n === null) return '--';
-    var v = Number(n);
-    var sign = v >= 0 ? '+' : '';
-    return sign + v.toFixed(2) + '%';
-}
-
 function fmtTime(ts) {
     if (!ts) return '--';
     return new Date(ts).toLocaleString('zh-CN');
@@ -790,7 +775,7 @@ async function loadSignals() {
             var price = bot.current_price ? fmtUSD(bot.current_price) : '--';
 
             var guideJSON = guide ? JSON.stringify(guide).replace(/"/g, '&quot;') : 'null';
-            return '<div class="signal-card" data-action="showSignalDetail" data-action-args="' + escHtml(JSON.stringify({strategyKey: strategyKey, direction: direction, guideData: guideData})) + '" style="cursor:pointer;">' +
+            return '<div class="signal-card" data-action="showSignalDetail" data-action-args="' + escHtml(JSON.stringify({strategyKey: strategyKey, direction: direction, guideData: guide})) + '" style="cursor:pointer;">' +
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">' +
                     '<span style="font-size:20px;">' + icon + '</span>' +
                     '<div>' +
@@ -1713,7 +1698,8 @@ function fmtUSD(val) {
 }
 function fmtPct(val) {
   if (val == null || isNaN(val)) return '--';
-  return (val >= 0 ? '+' : '') + (val * 100).toFixed(2) + '%';
+  var v = Number(val);
+  return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
 }
 function fmtNum(val, decimals) {
   if (val == null || isNaN(val)) return '--';

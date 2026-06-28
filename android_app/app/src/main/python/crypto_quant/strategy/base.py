@@ -135,6 +135,8 @@ class Strategy:
         else:
             raise TypeError("sma() takes 1 or 2 arguments")
         result = np.zeros_like(closes)
+        if len(closes) == 0:
+            return result
         for i in range(len(closes)):
             if i >= period - 1:
                 result[i] = np.mean(closes[i - period + 1:i + 1])
@@ -153,6 +155,8 @@ class Strategy:
         else:
             raise TypeError("ema() takes 1 or 2 arguments")
         result = np.zeros_like(closes)
+        if len(closes) == 0:
+            return result
         multiplier = 2 / (period + 1)
         result[0] = closes[0]
         for i in range(1, len(closes)):
@@ -171,12 +175,19 @@ class Strategy:
             high, low, close, period = args
         else:
             raise TypeError("atr() takes 1 or 4 arguments")
-        tr = np.maximum(high - low,
-                       np.maximum(np.abs(high - np.roll(close, 1)),
-                                  np.abs(low - np.roll(close, 1))))
+        tr = np.zeros(len(close))
+        if len(close) == 0:
+            return tr
         tr[0] = high[0] - low[0]
+        for j in range(1, len(close)):
+            tr[j] = max(high[j] - low[j],
+                       abs(high[j] - close[j-1]),
+                       abs(low[j] - close[j-1]))
         result = np.zeros_like(close)
-        result[:period] = np.mean(tr[:period])
+        if period > 0 and len(close) >= period:
+            result[:period] = np.mean(tr[:period])
+        else:
+            result[:] = np.mean(tr)
         for i in range(period, len(close)):
             result[i] = (result[i-1] * (period - 1) + tr[i]) / period
         return result
@@ -197,8 +208,13 @@ class Strategy:
         losses = np.where(deltas < 0, -deltas, 0)
         
         result = np.zeros_like(closes)
+        if len(closes) == 0:
+            return result
         avg_gain = np.mean(gains[:period])
         avg_loss = np.mean(losses[:period])
+        
+        # Mark first period values as NaN (insufficient data)
+        result[:period] = np.nan
         
         for i in range(period, len(closes)):
             avg_gain = (avg_gain * (period - 1) + gains[i]) / period
@@ -232,8 +248,12 @@ class Strategy:
                 window = closes[i - period + 1:i + 1]
                 mid[i] = np.mean(window)
                 std = np.std(window)
-                upper[i] = mid[i] + std_dev * std
-                lower[i] = mid[i] - std_dev * std
+                if std > 0:
+                    upper[i] = mid[i] + std_dev * std
+                    lower[i] = mid[i] - std_dev * std
+                else:
+                    upper[i] = mid[i]
+                    lower[i] = mid[i]
             else:
                 mid[i] = np.nan
                 upper[i] = np.nan
@@ -248,6 +268,8 @@ class Strategy:
         slow_ema = self.ema(slow)
         macd_line = fast_ema - slow_ema
         signal_line = np.zeros_like(macd_line)
+        if len(macd_line) == 0:
+            return macd_line, signal_line, macd_line - signal_line
         mult = 2 / (signal + 1)
         signal_line[0] = macd_line[0]
         for i in range(1, len(macd_line)):

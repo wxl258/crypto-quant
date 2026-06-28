@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
             }
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    if (pythonReady.get()) showWebView()
+                    if (!isDestroyed && pythonReady.get()) showWebView()
                 }
             }
             webChromeClient = WebChromeClient()
@@ -98,8 +98,9 @@ class MainActivity : AppCompatActivity() {
 
                 handler.post {
                     try {
-                        py = Python.getInstance()
-                        module = py!!.getModule("crypto_quant_bridge")
+                        val pyInstance = Python.getInstance()
+                        py = pyInstance
+                        module = pyInstance.getModule("crypto_quant_bridge")
                     } catch (e: Exception) {
                         initError = e
                     } finally {
@@ -108,12 +109,16 @@ class MainActivity : AppCompatActivity() {
                 }
                 latch.await()
 
-                if (initError != null) {
-                    updateUI("启动失败: ${initError!!.message}", initError!!.javaClass.simpleName)
-                    progressBar.visibility = View.GONE
+                if (initError != null || py == null || module == null) {
+                    val msg = initError?.message ?: "Python 模块加载失败"
+                    updateUI("启动失败: $msg", initError?.javaClass?.simpleName ?: "UnknownError")
+                    handler.post { progressBar.visibility = View.GONE }
                     serverStarted.set(false)
                     return@execute
                 }
+
+                val safePy = py!!
+                val safeModule = module!!
 
                 updateUI("正在启动交易引擎...", "加载量化系统模块")
 
@@ -124,7 +129,7 @@ class MainActivity : AppCompatActivity() {
 
                 handler.post {
                     try {
-                        result = module!!.callAttr("start_server", serverPort)
+                        result = safeModule.callAttr("start_server", serverPort)
                     } catch (e: Exception) {
                         callError = e
                     } finally {
@@ -135,7 +140,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (callError != null) {
                     updateUI("启动失败: ${callError!!.message}", callError!!.javaClass.simpleName)
-                    progressBar.visibility = View.GONE
+                    handler.post { progressBar.visibility = View.GONE }
                     serverStarted.set(false)
                     return@execute
                 }
@@ -144,7 +149,7 @@ class MainActivity : AppCompatActivity() {
                 pollServerHealth()
             } catch (e: Exception) {
                 updateUI("启动失败: ${e.message}", e.javaClass.simpleName)
-                progressBar.visibility = View.GONE
+                handler.post { progressBar.visibility = View.GONE }
                 serverStarted.set(false)
             }
         }
@@ -161,9 +166,14 @@ class MainActivity : AppCompatActivity() {
                 conn.readTimeout = 2000
                 if (conn.responseCode == 200) {
                     conn.disconnect()
+                    if (isDestroyed) return
                     pythonReady.set(true)
                     updateUI("交易引擎已启动！", "正在加载界面...")
-                    handler.post { webView.loadUrl("http://127.0.0.1:$serverPort") }
+                    handler.post {
+                        if (!isDestroyed) {
+                            webView.loadUrl("http://127.0.0.1:$serverPort")
+                        }
+                    }
                     return
                 }
                 conn.disconnect()
@@ -174,13 +184,14 @@ class MainActivity : AppCompatActivity() {
             try { Thread.sleep(500) } catch (_: InterruptedException) { break }
         }
         updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
-        progressBar.visibility = View.GONE
+        handler.post { progressBar.visibility = View.GONE }
         serverStarted.set(false)
     }
 
     @SuppressLint("SetTextI18n")
     private fun updateUI(status: String, detail: String) {
         handler.post {
+            if (isDestroyed) return@post
             statusText.text = status
             detailText.text = detail
         }
@@ -211,7 +222,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         isDestroyed = true
-        executor.execute {
+        // Send shutdown signal and wait briefly for the HTTP call to complete
+        // before shutting down the executor, to avoid killing the shutdown request.
+        val shutdownFuture = executor.submit<Unit> {
             try {
                 val url = java.net.URL("http://127.0.0.1:$serverPort/shutdown")
                 val conn = url.openConnection() as java.net.HttpURLConnection
@@ -222,6 +235,10 @@ class MainActivity : AppCompatActivity() {
                 conn.disconnect()
             } catch (_: Exception) {}
         }
+        try {
+            // Give the shutdown request up to 3 seconds to complete
+            shutdownFuture.get(3000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {}
         executor.shutdownNow()
         try {
             webView.stopLoading()

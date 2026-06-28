@@ -11,6 +11,7 @@ Features:
 import asyncio
 import logging
 import time
+import threading
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
@@ -48,6 +49,7 @@ class LivePaperTrader:
         # Price history for strategy context (last N candles)
         self._price_history: List[dict] = []
         self._max_history = 100
+        self._history_lock = threading.Lock()
 
         # Offline fallback config: offline_pause=true means stop trading when offline
         self._allow_fallback_simulation = not get_trading_config().get(
@@ -222,16 +224,17 @@ class LivePaperTrader:
         self._tick_count += 1
 
         # Update price history
-        self._price_history.append({
-            'timestamp': self._last_tick,
-            'open': ticker.get('open', price),
-            'high': ticker.get('high', price),
-            'low': ticker.get('low', price),
-            'close': price,
-            'volume': ticker.get('volume', 0),
-        })
-        if len(self._price_history) > self._max_history:
-            self._price_history = self._price_history[-self._max_history:]
+        with self._history_lock:
+            self._price_history.append({
+                'timestamp': self._last_tick,
+                'open': ticker.get('open', price),
+                'high': ticker.get('high', price),
+                'low': ticker.get('low', price),
+                'close': price,
+                'volume': ticker.get('volume', 0),
+            })
+            if len(self._price_history) > self._max_history:
+                self._price_history = self._price_history[-self._max_history:]
 
         # Update simulator with current price
         self.simulator.update_price(self.symbol, price, self._last_tick)
@@ -239,23 +242,26 @@ class LivePaperTrader:
         # Check stop conditions for open positions
         for sym in list(self.simulator.positions.keys()):
             if self.simulator.risk_manager.check_stop_conditions(sym, price):
+                # Capture position info before closing
+                pos_info = self.simulator.positions.get(sym, {})
+                side = pos_info.get('side', 'LONG') if pos_info else 'LONG'
                 self.simulator.close_position(sym, price, "止损/止盈触发", self._last_tick)
                 self._trade_count += 1
                 logger.info(f"Auto-closed {sym} @ {price} (stop condition)")
                 # 推送风控告警
-                pos = self.simulator.positions.get(sym)
-                side = pos.get('side', 'LONG') if pos else 'LONG'
                 get_notifier().risk_alert(
                     f"{sym} 止损/止盈触发",
                     f"价格：${price:,.2f}\n原因：止损/止盈条件触发"
                 )
 
         # If we have enough history, run strategy
-        if len(self._price_history) >= 30:
+        with self._history_lock:
+            history_snapshot = list(self._price_history)
+        if len(history_snapshot) >= 30:
             import pandas as pd
             import numpy as np
 
-            df = pd.DataFrame(self._price_history)
+            df = pd.DataFrame(history_snapshot)
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df.set_index('timestamp', inplace=True)
 

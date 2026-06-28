@@ -158,10 +158,10 @@ class PaperTradingSimulator:
         self.order_history.append(order)
         
         # Update original trade in DB
-        # Find the open trade for this symbol
+        # Find the open trade for this symbol and close it
         open_trades = self._store.load_open_positions()
         for t in open_trades:
-            if t['symbol'] == symbol and t['status'] == 'OPEN':
+            if t['symbol'] == symbol and t.get('status') == 'OPEN':
                 self._store.close_trade_in_db(
                     t['id'], price,
                     round(pnl, 2) if pnl else 0,
@@ -277,7 +277,7 @@ class PaperTradingSimulator:
                     'leverage': t.get('leverage', 3),
                     'open_time': t.get('open_time', ''),
                 }
-                # Deduct only fee (matching open_position behavior)
+                # Deduct fee (matching open_position behavior — margin is tracked via positions, not deducted from capital)
                 position_value = t['quantity'] * t['entry_price'] / t.get('leverage', 3)
                 fee = position_value * get_backtest_config().get('commission', 0.0004)
                 self.capital -= fee
@@ -314,5 +314,7 @@ class PaperTradingSimulator:
         self.order_history = []
         self.equity_history = []
         self._current_price = {}
-        self.risk_manager = RiskManager(limits=self.risk_manager.limits, initial_capital=self.initial_capital)
+        # Preserve risk limits from the current manager, falling back to defaults
+        old_limits = getattr(self.risk_manager, 'limits', None)
+        self.risk_manager = RiskManager(limits=old_limits, initial_capital=self.initial_capital)
         self.risk_manager.set_capital(self.initial_capital)

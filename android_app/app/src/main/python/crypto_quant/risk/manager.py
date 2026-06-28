@@ -72,8 +72,6 @@ class RiskManager:
         # 最大回撤熔断
         self.peak_equity = initial_capital
         self.max_drawdown_fuse_pct = 0.20
-        self._trading_paused = False
-        self._pause_reason = ""
     
     def set_capital(self, capital: float):
         """Update total capital"""
@@ -87,6 +85,9 @@ class RiskManager:
         
         Returns quantity in base asset units.
         """
+        if price <= 0:
+            return 0.0
+        
         if self.limits.position_sizing == "fixed":
             # Fixed percentage of capital
             position_value = self.total_capital * self.limits.max_position_pct
@@ -154,7 +155,7 @@ class RiskManager:
             p.quantity * p.entry_price / p.leverage 
             for p in self.positions.values()
         )
-        if total_value / self.total_capital >= self.limits.max_total_position_pct:
+        if self.total_capital > 0 and total_value / self.total_capital >= self.limits.max_total_position_pct:
             return False, "总仓位已达上限"
         
         # Check consecutive losses
@@ -251,7 +252,7 @@ class RiskManager:
             'pause_reason': self.pause_reason,
             'total_capital': round(self.total_capital, 2),
             'open_positions': len(self.positions),
-            'total_exposure_pct': round(total_value / self.total_capital * 100, 2),
+            'total_exposure_pct': round(total_value / self.total_capital * 100, 2) if self.total_capital > 0 else 0,
             'daily_pnl': round(daily_pnl, 2),
             'consecutive_losses': self.consecutive_losses,
             'positions': [
@@ -274,9 +275,9 @@ class RiskManager:
             self.peak_equity = current_equity
         dd = (self.peak_equity - current_equity) / self.peak_equity if self.peak_equity > 0 else 0
         if dd > self.max_drawdown_fuse_pct:
-            self._trading_paused = True
-            self._pause_reason = f"最大回撤熔断: {dd:.1%}"
-            return (True, self._pause_reason)
+            self.trading_paused = True
+            self.pause_reason = f"最大回撤熔断: {dd:.1%}"
+            return (True, self.pause_reason)
         return (False, "")
     
     def check_portfolio_risk(self, positions: dict, current_prices: dict) -> tuple:
@@ -284,20 +285,21 @@ class RiskManager:
         if not positions:
             return (True, "")
         
-        # 计算组合总敞口
+        # 计算组合总敞口 (margin value, not notional)
         total_exposure = 0.0
         for sym, pos in positions.items():
             price = current_prices.get(sym, pos.get('entry_price', 0))
             qty = pos.get('quantity', 0)
             leverage = pos.get('leverage', 1)
-            total_exposure += qty * price * leverage
+            if leverage > 0 and price > 0:
+                total_exposure += qty * price / leverage
         
         exposure_pct = total_exposure / self.peak_equity if self.peak_equity > 0 else 1.0
         
         if exposure_pct > self.limits.max_total_position_pct:
-            self._trading_paused = True
-            self._pause_reason = f"组合敞口超限: {exposure_pct:.1%} > {self.limits.max_total_position_pct:.1%}"
-            return (False, self._pause_reason)
+            self.trading_paused = True
+            self.pause_reason = f"组合敞口超限: {exposure_pct:.1%} > {self.limits.max_total_position_pct:.1%}"
+            return (False, self.pause_reason)
         
         return (True, "")
 

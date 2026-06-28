@@ -17,7 +17,13 @@ from pathlib import Path
 
 from config import get_mode, get_web_config
 from web.routes import router as api_router
-from web.evolution_routes import router as evolution_router
+
+try:
+    from web.evolution_routes import router as evolution_router
+except ImportError as e:
+    logger = logging.getLogger(__name__)
+    logger.warning(f"Evolution routes not available: {e}")
+    evolution_router = None
 
 # Setup logging
 logging.basicConfig(
@@ -45,7 +51,8 @@ app.add_middleware(
 
 # API Routes
 app.include_router(api_router)
-app.include_router(evolution_router)
+if evolution_router is not None:
+    app.include_router(evolution_router)
 
 # Static files
 static_dir = Path(__file__).parent / "web" / "static"
@@ -123,8 +130,10 @@ async def health():
 async def shutdown():
     """Graceful shutdown endpoint for Android lifecycle."""
     import asyncio
+    import signal
     loop = asyncio.get_running_loop()
-    loop.call_later(0.5, lambda: os._exit(0))
+    # Use SIGTERM to trigger graceful uvicorn shutdown instead of os._exit
+    loop.call_later(0.5, lambda: signal.raise_signal(signal.SIGTERM))
     return {"status": "shutting_down"}
 
 
@@ -133,9 +142,11 @@ if __name__ == "__main__":
     logger.info(f"Starting server on {web.get('host', '0.0.0.0')}:{web.get('port', 8000)}")
     logger.info(f"Mode: {get_mode()}")
     is_android = os.environ.get("CQ_ANDROID", "0") == "1"
+    # Never use reload when imported via bridge or on Android
+    use_reload = get_mode() == "paper" and not is_android
     uvicorn.run(
         "main:app",
         host=web.get('host', '0.0.0.0'),
         port=web.get('port', 8000),
-        reload=(get_mode() == "paper" and not is_android),
+        reload=use_reload,
     )

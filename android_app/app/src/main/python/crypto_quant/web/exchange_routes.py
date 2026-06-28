@@ -74,12 +74,12 @@ async def exchange_status():
             "active": ex_id,
             "available": SUPPORTED_EXCHANGES if SUPPORTED_EXCHANGES else ["binance", "okx"],
             "binance": {
-                "configured": bool(bin_cfg.get("api_key")),
-                "testnet": bin_cfg.get("testnet", True),
+                "configured": bool(bin_cfg.get("api_key") if bin_cfg else None),
+                "testnet": bin_cfg.get("testnet", True) if bin_cfg else True,
             },
             "okx": {
-                "configured": bool(okx_cfg.get("api_key")),
-                "testnet": okx_cfg.get("testnet", True),
+                "configured": bool(okx_cfg.get("api_key") if okx_cfg else None),
+                "testnet": okx_cfg.get("testnet", True) if okx_cfg else True,
             },
         }
     except Exception as e:
@@ -116,6 +116,7 @@ async def exchange_list():
 @router.post("/test")
 async def test_connection(req: ExchangeKeyRequest):
     """测试交易所 API 连接是否正常"""
+    client = None
     try:
         MultiExchangeClient, _ = _import_client()
         if MultiExchangeClient is None:
@@ -149,6 +150,12 @@ async def test_connection(req: ExchangeKeyRequest):
         }
     except Exception as e:
         return {"error": "连接测试失败", "detail": str(e)}
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
 
 # ── 切换交易所 ──
