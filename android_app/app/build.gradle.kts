@@ -61,11 +61,13 @@ chaquopy {
             install("pyyaml")
             install("aiofiles")
             install("requests")
-            install("scikit-learn")
             install("fpdf2")
             install("pydantic")
             install("plyer")
-            install("websocket-client")
+            // scikit-learn 体积约 20-30MB，AI 模块未在核心路径使用，暂不打包
+            // install("scikit-learn")
+            // websocket-client 未使用
+            // install("websocket-client")
         }
     }
 }

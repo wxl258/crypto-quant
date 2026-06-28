@@ -13,7 +13,7 @@ from execution.live_trader import LivePaperTrader
 from execution.reporter import TradingReporter
 from risk.manager import RiskLimits
 from strategy import StrategyRegistry
-from config import get_db_path, get_risk_config, get_trading_config, get_binance_config
+from config import get_db_path, get_risk_config, get_backtest_config
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class TradingScheduler:
             available = StrategyRegistry.list_strategies()
             raise ValueError(f"Unknown strategy '{strategy_name}'. Available: {available}")
         strategy = strategy_cls()
-        strategy.params['leverage'] = leverage
+        strategy._params['leverage'] = leverage
 
         # Create dependencies
         store = DataStore(get_db_path())
@@ -70,9 +70,8 @@ class TradingScheduler:
             take_profit_pct=float(risk_cfg.get('take_profit_pct', 0.10)),
             position_sizing=str(risk_cfg.get('position_sizing', 'fixed')),
         )
-        trading_cfg = get_trading_config()
         simulator = PaperTradingSimulator(
-            initial_capital=trading_cfg.get('default_quantity', 10000),
+            initial_capital=get_backtest_config().get('initial_capital', 10000),
             risk_limits=limits,
         )
 

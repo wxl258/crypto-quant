@@ -172,10 +172,17 @@ class Strategy:
             result[i] = (result[i-1] * (period - 1) + tr[i]) / period
         return result
     
-    def rsi(self, period: int = 14):
-        """Relative Strength Index"""
+    def rsi(self, *args):
+        """Relative Strength Index. Supports both rsi(period) and rsi(data, period)."""
         import numpy as np
-        closes = self.data['close'].values
+        if len(args) == 1:
+            period = args[0]
+            closes = self.data['close'].values
+        elif len(args) == 2:
+            closes, period = args
+        else:
+            raise TypeError("rsi() takes 1 or 2 arguments")
+        
         deltas = np.diff(closes, prepend=closes[0])
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
@@ -194,6 +201,14 @@ class Strategy:
                 result[i] = 100 - (100 / (1 + rs))
         
         return result
+    
+    def signal_quality_score(self, i: int, direction: str) -> float:
+        """Default signal quality score. Override in subclasses for advanced filtering."""
+        return 1.0
+    
+    def is_trending_adx(self, high, low, close, i: int, period: int = 14, threshold: float = 25.0) -> bool:
+        """Default ADX trend check. Returns False (no strong trend) by default."""
+        return False
     
     def bollinger_bands(self, period: int = 20, std_dev: float = 2.0):
         """Bollinger Bands"""

@@ -15,34 +15,30 @@
 
 ## GitHub 自动打包
 
-**每次推送代码到 main 分支，GitHub Actions 会自动打包生成 APK。**
+**每次推送代码到 master 分支，GitHub Actions 会自动打包生成 APK。**
 
 ### 下载 APK
 
 1. 进入仓库的 **Actions** 标签页
-2. 点击最新的 **打包 APK** 工作流
-3. 在底部 **Artifacts** 区域下载 `crypto-quant-apk`
+2. 点击最新的 **打包 APK (Chaquopy)** 工作流
+3. 在底部 **Artifacts** 区域下载 `CryptoQuant-v1.0.0-debug`
 
 ### 手动触发打包
 
-1. 进入 **Actions** → **打包 APK**
+1. 进入 **Actions** → **打包 APK (Chaquopy)**
 2. 点击 **Run workflow** → **Run workflow**
 
 ## 本地打包
 
-需要 Linux 环境（或 Windows WSL2）：
+需要 Linux 环境（或 Windows WSL2）与 OpenJDK 17：
 
 ```bash
-# 1. 安装依赖
-sudo apt update && sudo apt install -y git zip unzip openjdk-17-jdk \
-    python3-pip autoconf libtool cmake libffi-dev libssl-dev expect
-pip3 install --user buildozer cython
-
-# 2. 打包
-buildozer android debug
-
-# 3. APK 在 ./bin/ 目录下
+cd android_app
+chmod +x gradlew
+./gradlew assembleDebug
 ```
+
+APK 输出在 `android_app/app/build/outputs/apk/debug/` 目录下。
 
 ## 安装使用
 
@@ -56,3 +52,4 @@ buildozer android debug
 - API Key 仅存储在手机本地，不上传任何服务器
 - 创建 API Key 时**不要开启提现权限**
 - 建议先用模拟盘熟悉再切实盘
+- 请勿将含真实 API Key 的 `config.yaml` 提交到 Git 仓库

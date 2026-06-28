@@ -14,6 +14,13 @@ def _get_db_path():
     return get_db_path()
 
 
+def _get_kline_tables(conn):
+    """获取所有 klines_ 开头的表名"""
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'klines_%'")
+    return [r[0] for r in cur.fetchall()]
+
+
 @router.get("/stats")
 async def data_stats():
     """数据统计概览"""
@@ -22,35 +29,58 @@ async def data_stats():
         return {"exists": False}
 
     conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-
     stats = {"exists": True}
 
     # K线数据统计
     try:
-        cur.execute("SELECT COUNT(*) FROM ohlcv")
-        stats["total_klines"] = cur.fetchone()[0]
+        kline_tables = _get_kline_tables(conn)
+        total_klines = 0
+        min_time = None
+        max_time = None
+        pairs = {}
 
-        cur.execute("SELECT MIN(timestamp), MAX(timestamp) FROM ohlcv")
-        row = cur.fetchone()
-        if row[0]:
-            stats["earliest_data"] = datetime.fromtimestamp(row[0] / 1000).isoformat()
-            stats["latest_data"] = datetime.fromtimestamp(row[1] / 1000).isoformat()
+        for table in kline_tables:
+            parts = table.split('_')
+            if len(parts) >= 3:
+                symbol = '_'.join(parts[1:-1])
+                interval = parts[-1]
+            else:
+                symbol, interval = table, ''
 
-        cur.execute("SELECT COUNT(DISTINCT symbol) FROM ohlcv")
-        stats["symbols_count"] = cur.fetchone()[0]
+            cur = conn.cursor()
+            try:
+                cur.execute(f'SELECT COUNT(*) FROM "{table}"')
+                count = cur.fetchone()[0]
+                total_klines += count
+                pairs[f"{symbol}_{interval}"] = count
 
-        cur.execute("SELECT COUNT(DISTINCT interval) FROM ohlcv")
-        stats["intervals_count"] = cur.fetchone()[0]
+                cur.execute(f'SELECT MIN(open_time), MAX(open_time) FROM "{table}"')
+                row = cur.fetchone()
+                if row[0]:
+                    t_min = row[0] if isinstance(row[0], (int, float)) else int(row[0])
+                    t_max = row[1] if isinstance(row[1], (int, float)) else int(row[1])
+                    if min_time is None or t_min < min_time:
+                        min_time = t_min
+                    if max_time is None or t_max > max_time:
+                        max_time = t_max
+            except Exception:
+                continue
 
-        cur.execute(
-            "SELECT symbol, interval, COUNT(*) as cnt FROM ohlcv GROUP BY symbol, interval ORDER BY cnt DESC LIMIT 10")
-        stats["top_pairs"] = [{"symbol": r[0], "interval": r[1], "count": r[2]} for r in cur.fetchall()]
-    except:
-        stats["ohlcv_error"] = "表不存在或查询失败"
+        stats["total_klines"] = total_klines
+        stats["symbols_count"] = len(pairs)
+        if min_time and max_time:
+            stats["earliest_data"] = datetime.fromtimestamp(min_time / 1000).isoformat()
+            stats["latest_data"] = datetime.fromtimestamp(max_time / 1000).isoformat()
+        stats["top_pairs"] = [
+            {"symbol": k.rsplit('_', 1)[0], "interval": k.rsplit('_', 1)[1], "count": v}
+            for k, v in sorted(pairs.items(), key=lambda x: -x[1])[:10]
+        ]
+    except Exception as e:
+        stats["ohlcv_error"] = f"查询失败: {e}"
 
     # 交易记录统计
     try:
+        cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM trade_history")
         stats["total_trades"] = cur.fetchone()[0]
 
@@ -67,7 +97,7 @@ async def data_stats():
         wins = cur.fetchone()[0]
         if stats["closed_trades"] > 0:
             stats["win_rate"] = round(wins / stats["closed_trades"] * 100, 1)
-    except:
+    except Exception:
         stats["trade_error"] = "表不存在或查询失败"
 
     # 数据库大小
@@ -85,18 +115,23 @@ async def cleanup_data(days: int = 90):
 
     db_path = _get_db_path()
     conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-
     cutoff = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
 
     try:
-        cur.execute("SELECT COUNT(*) FROM ohlcv WHERE timestamp < ?", (cutoff,))
-        deleted_count = cur.fetchone()[0]
-
-        cur.execute("DELETE FROM ohlcv WHERE timestamp < ?", (cutoff,))
+        deleted_count = 0
+        kline_tables = _get_kline_tables(conn)
+        for table in kline_tables:
+            try:
+                cur = conn.cursor()
+                cur.execute(f'SELECT COUNT(*) FROM "{table}" WHERE open_time < ?', (cutoff,))
+                deleted_count += cur.fetchone()[0]
+                cur.execute(f'DELETE FROM "{table}" WHERE open_time < ?', (cutoff,))
+            except Exception:
+                continue
         conn.commit()
 
         # 压缩数据库
+        cur = conn.cursor()
         cur.execute("VACUUM")
 
         new_size = round(Path(db_path).stat().st_size / (1024 * 1024), 2)

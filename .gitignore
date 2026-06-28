@@ -1,7 +1,9 @@
-.buildozer/
 __pycache__/
 *.pyc
 *.bak
+*.db
+*.db-journal
+*.zip
 
 # Android
 android_app/.gradle/
@@ -10,3 +12,7 @@ android_app/app/build/
 android_app/local.properties
 *.iml
 .idea/
+
+# Secrets - never commit files with real API keys
+# config.yaml with real keys should not be in version control
+# The project's config.yaml is kept empty by default

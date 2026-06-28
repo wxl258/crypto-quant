@@ -54,9 +54,10 @@ class MainActivity : AppCompatActivity() {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                allowFileAccess = true
-                allowContentAccess = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                allowFileAccess = false
+                allowContentAccess = false
+                // 本地 127.0.0.1 是回环地址，不需要 cleartext 特殊处理
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 setSupportZoom(true)
                 builtInZoomControls = true
@@ -103,9 +104,9 @@ class MainActivity : AppCompatActivity() {
             try {
                 updateUI("正在初始化 Python 环境...", "")
 
-                // Initialize Python
+                // Initialize Python using Application context to avoid leaks
                 if (!Python.isStarted()) {
-                    Python.start(AndroidPlatform(this@MainActivity))
+                    Python.start(AndroidPlatform(applicationContext))
                 }
 
                 updateUI("正在启动交易引擎...", "加载量化系统模块")
@@ -202,7 +203,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Clean up executor and WebView to prevent leaks and port conflicts
+        executor.shutdownNow()
+        try {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.clearHistory()
+            webView.removeAllViews()
+            webView.destroy()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Re-layout WebView on rotation
+        webView.post { webView.requestLayout() }
     }
 
     companion object {
