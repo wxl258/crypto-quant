@@ -138,13 +138,35 @@ class StrategyRegistry:
     
     @classmethod
     def list_strategies(cls) -> List[Dict]:
-        """Return registered strategies with name and class info."""
+        """Return registered strategies with full info."""
         result = []
         for name, strategy_cls in cls._strategies.items():
+            # Get docstring (first line as short description)
+            doc = (strategy_cls.__doc__ or "").strip()
+            short_desc = doc.split('\n')[0].strip() if doc else ""
+            # Get params
+            params = []
+            if hasattr(strategy_cls, 'get_param_info'):
+                try:
+                    params = strategy_cls.get_param_info()
+                except Exception:
+                    pass
+            # If no params from get_param_info, try _default_params
+            if not params and hasattr(strategy_cls, '_default_params'):
+                try:
+                    inst = strategy_cls()
+                    default_params = inst._default_params() if hasattr(inst, '_default_params') else {}
+                    for k, v in default_params.items():
+                        params.append({"name": k, "label": k, "default": v, "type": type(v).__name__})
+                except Exception:
+                    pass
+
             result.append({
                 "name": name,
                 "class": strategy_cls.__name__,
                 "module": strategy_cls.__module__,
+                "description": short_desc,
+                "parameters": params,
             })
         return result
 
