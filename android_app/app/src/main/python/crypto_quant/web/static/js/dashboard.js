@@ -24,6 +24,7 @@ var sma50Series   = null;
 var _currentSymbol   = null;
 var _currentInterval = null;
 var equityChart      = null;
+var accountData      = null;
 
 /* ==========================================================================
  * Defensive helpers (local)
@@ -83,6 +84,7 @@ function loadAccount() {
         try {
             var data = await API.get('/api/account');
             if (!data) return;
+            accountData = data;
 
             // Stat cards
             var totalEquityEl      = safeGet('#total-equity');
@@ -672,10 +674,15 @@ function renderCalendar(dailyPnl, dailyTrades) {
         } else if (Math.abs(pnl) < 0.001) {
             cls += ' neutral';
         } else if (pnl > 0) {
-            cls += (maxAbsPnl > 0 && pnl / maxAbsPnl > 0.5) ? ' profit-high' : ' profit';
+            // 盈亏深度分级 (替换原有的 profit/loss 单一类名)
+            var pnlRatio = Math.abs(pnl) / (accountData ? accountData.capital || 10000 : 10000);
+            var pnlClass = pnlRatio > 0.02 ? 'profit-high' : pnlRatio > 0.005 ? 'profit-medium' : 'profit-low';
+            cls += ' ' + pnlClass;
             pnlText = '+' + pnl.toFixed(0);
         } else {
-            cls += (maxAbsPnl > 0 && Math.abs(pnl) / maxAbsPnl > 0.5) ? ' loss-high' : ' loss';
+            var pnlRatio = Math.abs(pnl) / (accountData ? accountData.capital || 10000 : 10000);
+            var pnlClass = pnlRatio > 0.02 ? 'loss-high' : pnlRatio > 0.005 ? 'loss-medium' : 'loss-low';
+            cls += ' ' + pnlClass;
             pnlText = pnl.toFixed(0);
         }
 

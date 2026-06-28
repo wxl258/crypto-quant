@@ -1632,3 +1632,97 @@ document.addEventListener('click', function(e) {
     e.target.style.display = 'none';
   }
 });
+
+/* ==========================================================================
+ * SECTION 31 – Gesture interactions (pull-to-refresh, swipe back)
+ * ========================================================================== */
+(function() {
+  var touchStartY = 0;
+  var touchStartX = 0;
+  var pullThreshold = 80;
+  var pullEl = null;
+  
+  // Pull-to-refresh on main content
+  document.addEventListener('touchstart', function(e) {
+    touchStartY = e.touches[0].clientY;
+    touchStartX = e.touches[0].clientX;
+    pullEl = null;
+  }, {passive: true});
+  
+  document.addEventListener('touchmove', function(e) {
+    if (window.scrollY > 5) return;
+    var dy = e.touches[0].clientY - touchStartY;
+    var dx = Math.abs(e.touches[0].clientX - touchStartX);
+    if (dy > 20 && dx < 30 && !pullEl) {
+      pullEl = document.createElement('div');
+      pullEl.className = 'pull-indicator';
+      pullEl.textContent = '↓ 下拉刷新';
+      pullEl.style.cssText = 'text-align:center;padding:12px;color:#94a3b8;font-size:13px;';
+      document.querySelector('.main-content')?.prepend(pullEl);
+    }
+    if (pullEl && dy > pullThreshold) {
+      pullEl.textContent = '松开刷新';
+      pullEl.style.color = '#818cf8';
+    }
+  }, {passive: true});
+  
+  document.addEventListener('touchend', function() {
+    var dy = (window.scrollY === 0 && pullEl) ? 100 : 0;
+    if (pullEl) {
+      if (dy > pullThreshold || pullEl.textContent === '松开刷新') {
+        pullEl.textContent = '⏳ 刷新中...';
+        safeCallGlobal('refreshDashboard');
+        safeCallGlobal('loadSignals');
+        setTimeout(function() {
+          if (pullEl && pullEl.parentNode) pullEl.parentNode.removeChild(pullEl);
+        }, 800);
+      } else {
+        if (pullEl.parentNode) pullEl.parentNode.removeChild(pullEl);
+      }
+      pullEl = null;
+    }
+  });
+  
+  // Swipe right to go back in WebView history
+  document.addEventListener('touchstart', function(e) {
+    touchStartX = e.touches[0].clientX;
+  }, {passive: true});
+  
+  document.addEventListener('touchend', function(e) {
+    var dx = e.changedTouches[0].clientX - touchStartX;
+    if (dx > 80 && touchStartX < 30 && Math.abs(e.changedTouches[0].clientY - touchStartY) < 60) {
+      // Swipe right from left edge → go back
+      if (window.history.length > 1) {
+        window.history.back();
+      }
+    }
+  });
+})();
+
+/* ==========================================================================
+ * SECTION 32 – Unified number formatting
+ * ========================================================================== */
+function fmtUSD(val) {
+  if (val == null || isNaN(val)) return '--';
+  return (val < 0 ? '-' : '') + '$' + Math.abs(val).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtPct(val) {
+  if (val == null || isNaN(val)) return '--';
+  return (val >= 0 ? '+' : '') + (val * 100).toFixed(2) + '%';
+}
+function fmtNum(val, decimals) {
+  if (val == null || isNaN(val)) return '--';
+  decimals = decimals || 4;
+  return val.toLocaleString('en-US', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+}
+function fmtVolume(val) {
+  if (val == null || isNaN(val)) return '--';
+  if (val >= 1e6) return (val/1e6).toFixed(1) + 'M';
+  if (val >= 1e3) return (val/1e3).toFixed(1) + 'K';
+  return val.toFixed(2);
+}
+// 确保全局可用
+window.fmtUSD = fmtUSD;
+window.fmtPct = fmtPct;
+window.fmtNum = fmtNum;
+window.fmtVolume = fmtVolume;
