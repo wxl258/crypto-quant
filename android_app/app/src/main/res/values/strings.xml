@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">CryptoQuant</string>
+    <string name="loading_title">CryptoQuant 正在启动</string>
+    <string name="loading_message">正在初始化量化交易引擎...</string>
+    <string name="foreground_service_channel">CryptoQuant 服务</string>
+    <string name="foreground_service_title">量化引擎运行中</string>
+    <string name="foreground_service_text">Python 量化交易系统正在后台运行</string>
+</resources>

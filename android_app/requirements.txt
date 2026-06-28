@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+pandas
+numpy
+ccxt
+websockets
+pyyaml
+aiofiles
+requests
+scikit-learn
+fpdf2
+pydantic
+plyer
+websocket-client
