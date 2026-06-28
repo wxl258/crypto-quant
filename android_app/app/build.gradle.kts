@@ -20,26 +20,6 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
-
-        python {
-            version = "3.10"
-            pip {
-                install("fastapi")
-                install("uvicorn")
-                install("pandas")
-                install("numpy")
-                install("ccxt")
-                install("websockets")
-                install("pyyaml")
-                install("aiofiles")
-                install("requests")
-                install("scikit-learn")
-                install("fpdf2")
-                install("pydantic")
-                install("plyer")
-                install("websocket-client")
-            }
-        }
     }
 
     buildFeatures {
@@ -63,6 +43,28 @@ android {
 
     kotlinOptions {
         jvmTarget = "1.8"
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.10"
+        pip {
+            install("fastapi")
+            install("uvicorn")
+            install("pandas")
+            install("numpy")
+            install("ccxt")
+            install("websockets")
+            install("pyyaml")
+            install("aiofiles")
+            install("requests")
+            install("scikit-learn")
+            install("fpdf2")
+            install("pydantic")
+            install("plyer")
+            install("websocket-client")
+        }
     }
 }
 
