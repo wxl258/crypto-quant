@@ -27,6 +27,9 @@ class Signal:
     reason: str = ""
     timestamp: Any = None
     quantity: Optional[float] = None
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
+    confidence: float = 0.0
 
 
 class Strategy:
@@ -49,6 +52,12 @@ class Strategy:
         self._entry_price = 0.0
         self._entry_bar = -1
         self._indicators: Dict[str, Any] = {}
+        # 信号频率控制
+        self._last_signal_bar = -20  # 最少间隔K线数
+        self._min_bars_between_signals = 3
+    
+    def can_generate_signal(self, current_bar: int) -> bool:
+        return (current_bar - self._last_signal_bar) >= self._min_bars_between_signals
     
     def get_param(self, name: str, default=None):
         return self._params.get(name, default)

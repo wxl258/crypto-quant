@@ -1472,3 +1472,136 @@ function closeOverlay() {
         }
     });
 })();
+
+/* ==========================================================================
+ * SECTION 26 – Ticker Bar update (polling)
+ * ========================================================================== */
+
+var _tickerPrevPrices = {};
+
+async function updateTickerBar() {
+    try {
+        var data = await API.get('/api/market/ticker');
+        if (!data) return;
+
+        var tickers = Array.isArray(data) ? data : (data.tickers || []);
+        if (tickers.length === 0) return;
+
+        // Mapping: symbol → DOM element IDs
+        var symbolMap = {
+            'BTCUSDT': { price: '#ticker-btc-price', change: '#ticker-btc-change' },
+            'ETHUSDT': { price: '#ticker-eth-price', change: '#ticker-eth-change' },
+        };
+
+        for (var i = 0; i < tickers.length; i++) {
+            var t = tickers[i];
+            var sym = t.symbol;
+            var els = symbolMap[sym];
+            if (!els) continue;
+
+            var priceEl = safeGet(els.price);
+            var changeEl = safeGet(els.change);
+
+            if (priceEl) {
+                var prevPrice = _tickerPrevPrices[sym];
+                if (prevPrice !== undefined) {
+                    priceEl.classList.remove('price-flash-up', 'price-flash-down');
+                    void priceEl.offsetWidth; // force reflow
+                    if (t.price > prevPrice) {
+                        priceEl.classList.add('price-flash-up');
+                    } else if (t.price < prevPrice) {
+                        priceEl.classList.add('price-flash-down');
+                    }
+                }
+                _tickerPrevPrices[sym] = t.price;
+                priceEl.textContent = fmtUSD(t.price);
+            }
+
+            if (changeEl) {
+                var changePct = t.change_pct || 0;
+                var sign = changePct >= 0 ? '+' : '';
+                changeEl.textContent = sign + (changePct * 100).toFixed(2) + '%';
+                changeEl.className = 'ticker-change ' + (changePct >= 0 ? 'up' : 'down');
+            }
+        }
+    } catch (e) {
+        // Silently ignore ticker errors
+        console.warn('Ticker update failed:', e.message);
+    }
+}
+
+/* ==========================================================================
+ * SECTION 27 – Quick Trade
+ * ========================================================================== */
+
+function quickBuy() {
+    quickTrade('BUY');
+}
+
+function quickSell() {
+    quickTrade('SELL');
+}
+
+async function quickTrade(side) {
+    var amountEl = safeGet('#qt-amount');
+    var symbolEl = safeGet('#dashboard-symbol');
+    var symbol = symbolEl ? symbolEl.value : 'BTCUSDT';
+    var amount = amountEl ? parseFloat(amountEl.value) : 0.01;
+
+    if (!amount || amount <= 0) {
+        showToast('请输入有效的交易数量', 'warning');
+        return;
+    }
+
+    var btnBuy = document.querySelector('.quick-trade-bar .btn-buy');
+    var btnSell = document.querySelector('.quick-trade-bar .btn-sell');
+    if (btnBuy) btnBuy.disabled = true;
+    if (btnSell) btnSell.disabled = true;
+
+    try {
+        var result = await API.post('/api/trade/open', {
+            symbol: symbol,
+            side: side,
+            quantity: amount,
+        });
+        if (result && result.message) {
+            showToast(result.message, 'success');
+        } else {
+            showToast(side + ' ' + symbol + ' x' + amount + ' 已提交', 'success');
+        }
+        // Refresh dashboard
+        if (typeof refreshDashboard === 'function') {
+            refreshDashboard();
+        }
+    } catch (e) {
+        showToast('交易失败: ' + friendlyError(e.message), 'error');
+    } finally {
+        if (btnBuy) btnBuy.disabled = false;
+        if (btnSell) btnSell.disabled = false;
+    }
+}
+
+/* ==========================================================================
+ * SECTION 28 – init() — startup sequence
+ * ========================================================================== */
+
+function init() {
+    // Start ticker polling every 5 seconds
+    updateTickerBar();
+    setInterval(updateTickerBar, 5000);
+
+    // Show quick trade bar
+    var qtBar = safeGet('#quick-trade-bar');
+    if (qtBar) qtBar.style.display = 'flex';
+
+    // Default symbol pre-selection
+    var symbolEl = safeGet('#dashboard-symbol');
+    if (symbolEl && !symbolEl.value) {
+        symbolEl.value = 'BTCUSDT';
+    }
+}
+
+// Run init after DOM is ready (also fires from DOMContentLoaded handler)
+document.addEventListener('DOMContentLoaded', function() {
+    init();
+});

@@ -12,7 +12,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from pathlib import Path
 
 from config import get_mode, get_web_config
@@ -98,7 +98,6 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """Serve main page"""
-    from fastapi.responses import FileResponse, HTMLResponse
     index_path = static_dir / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
@@ -120,13 +119,23 @@ async def health():
     return {"status": "ok", "mode": get_mode()}
 
 
+@app.get("/shutdown")
+async def shutdown():
+    """Graceful shutdown endpoint for Android lifecycle."""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.5, lambda: os._exit(0))
+    return {"status": "shutting_down"}
+
+
 if __name__ == "__main__":
     web = get_web_config()
     logger.info(f"Starting server on {web.get('host', '0.0.0.0')}:{web.get('port', 8000)}")
     logger.info(f"Mode: {get_mode()}")
+    is_android = os.environ.get("CQ_ANDROID", "0") == "1"
     uvicorn.run(
         "main:app",
         host=web.get('host', '0.0.0.0'),
         port=web.get('port', 8000),
-        reload=(get_mode() == "paper"),
+        reload=(get_mode() == "paper" and not is_android),
     )

@@ -56,14 +56,17 @@ class BacktestEngine:
         low = data['low'].values
         price = close[i]
         
-        # SMA slope for trend
-        sma20 = np.mean(close[max(0,i-20):i+1])
-        sma20_prev = np.mean(close[max(0,i-40):max(0,i-20)])
+        # SMA slope for trend — ensure at least 20 bars in each window
+        sma20 = np.mean(close[i-19:i+1])
+        sma20_prev = np.mean(close[i-39:i-19]) if i >= 39 else np.mean(close[max(0,i-39):i-19])
         
-        # ATR for volatility
-        tr = np.maximum(high[max(0,i-14):i+1] - low[max(0,i-14):i+1],
-                       np.maximum(np.abs(high[max(0,i-14):i+1] - np.roll(close[max(0,i-14):i+1], 1)),
-                                  np.abs(low[max(0,i-14):i+1] - np.roll(close[max(0,i-14):i+1], 1))))
+        # ATR for volatility — ensure at least 14 bars
+        window_high = high[max(0,i-13):i+1]
+        window_low = low[max(0,i-13):i+1]
+        window_close = close[max(0,i-13):i+1]
+        tr = np.maximum(window_high - window_low,
+                       np.maximum(np.abs(window_high - np.roll(window_close, 1)),
+                                  np.abs(window_low - np.roll(window_close, 1))))
         atr = np.mean(tr[-14:]) if len(tr) >= 14 else tr[-1]
         
         vol_ratio = atr / price if price > 0 else 0
@@ -189,7 +192,7 @@ class BacktestEngine:
         leverage = strategy.get_param('leverage', self.default_leverage)
         base_leverage = leverage
         base_alloc_pct = self.position_pct
-        _funding_hours = 0  # Tracks accumulated hours for funding (assumes 1h data)
+        _last_funding_ts = None  # Timestamp-based funding: last funding deduction time
 
         # Dynamic risk state
         peak_capital = self.initial_capital
@@ -230,14 +233,12 @@ class BacktestEngine:
             if signal.signal_type == SignalType.BUY and position == 0:
                 # Cooldown check + RiskManager check
                 if not strategy.can_enter(i):
-                    _funding_hours += 1
                     equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
                     continue
                 # RiskManager: check if position can be opened
                 risk_manager.set_capital(capital)
                 allowed, reason = risk_manager.can_open_position(symbol, "LONG")
                 if not allowed:
-                    _funding_hours += 1
                     equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
                     continue
                 # Open long
@@ -264,13 +265,11 @@ class BacktestEngine:
 
             elif signal.signal_type == SignalType.SELL and position == 0:
                 if not strategy.can_enter(i):
-                    _funding_hours += 1
                     equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
                     continue
                 risk_manager.set_capital(capital)
                 allowed, reason = risk_manager.can_open_position(symbol, "SHORT")
                 if not allowed:
-                    _funding_hours += 1
                     equity_curve.append({'timestamp': timestamp, 'equity': capital, 'capital': capital, 'position': position})
                     continue
                 # Open short
@@ -515,12 +514,26 @@ class BacktestEngine:
             elif position == -1:
                 unrealized = (entry_price - price) * position_size
 
-            # Funding rate: accumulate hours and deduct every 8h (assumes 1h candle interval)
-            _funding_hours += 1
-            if self.funding_rate > 0 and position != 0 and _funding_hours >= 8:
-                funding_cost = position_size * price * self.funding_rate
-                capital -= funding_cost
-                _funding_hours = 0
+            # Funding rate: deduct every 8 hours based on actual timestamps
+            if self.funding_rate > 0 and position != 0:
+                if isinstance(timestamp, (datetime, pd.Timestamp)):
+                    if _last_funding_ts is None:
+                        _last_funding_ts = timestamp
+                    hours_elapsed = (timestamp - _last_funding_ts).total_seconds() / 3600
+                    if hours_elapsed >= 8:
+                        cycles = int(hours_elapsed // 8)
+                        funding_cost = position_size * price * self.funding_rate * cycles
+                        capital -= funding_cost
+                        _last_funding_ts = timestamp
+                else:
+                    # Fallback for non-timestamp index: use bar count (8 bars per cycle)
+                    if _last_funding_ts is None:
+                        _last_funding_ts = 0
+                    _last_funding_ts += 1
+                    if _last_funding_ts >= 8:
+                        funding_cost = position_size * price * self.funding_rate
+                        capital -= funding_cost
+                        _last_funding_ts = 0
 
             current_equity = capital + unrealized
             equity_curve.append({

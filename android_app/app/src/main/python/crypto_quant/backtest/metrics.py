@@ -26,6 +26,7 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
     if equity_curve.empty:
         return {
             'total_return': 0, 'annual_return': 0, 'sharpe_ratio': 0,
+            'sortino_ratio': 0,
             'max_drawdown': 0, 'max_drawdown_duration': 0,
             'win_rate': 0, 'profit_factor': 0, 'calmar_ratio': 0,
             'total_trades': 0, 'winning_trades': 0, 'losing_trades': 0,
@@ -59,10 +60,24 @@ def calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame,
             periods_per_year = 365.25 * 24 * 3600 / max(median_seconds, 1)
         else:
             periods_per_year = 365  # fallback: daily
+        # Cap periods_per_year for high-frequency data (max hourly = 8760)
+        periods_per_year = min(periods_per_year, 8760)
         sharpe = (returns.mean() * periods_per_year - risk_free_rate) / (returns.std() * np.sqrt(periods_per_year))
     else:
         sharpe = 0
+        periods_per_year = 365
     metrics['sharpe_ratio'] = round(sharpe, 2)
+    
+    # Sortino Ratio — uses only downside deviation
+    if len(returns) > 1:
+        downside = returns[returns < 0]
+        if len(downside) > 1 and downside.std() > 0:
+            sortino = (returns.mean() * periods_per_year - risk_free_rate) / (downside.std() * np.sqrt(periods_per_year))
+        else:
+            sortino = 0
+    else:
+        sortino = 0
+    metrics['sortino_ratio'] = round(sortino, 2)
     
     # Max Drawdown
     rolling_max = equity_curve.expanding().max()

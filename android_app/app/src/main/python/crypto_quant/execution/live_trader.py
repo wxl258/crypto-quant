@@ -54,6 +54,18 @@ class LivePaperTrader:
             "offline_pause", True
         )
 
+        # Strategy lifecycle tracking — init only once, then only next()
+        self._strategy_initialized = False
+
+        # Reconnection exponential backoff
+        self._reconnect_base_delay = 1.0   # seconds
+        self._reconnect_max_delay = 60.0   # seconds
+        self._reconnect_attempts = 0
+
+        # Duplicate tick detection
+        self._last_tick_timestamp = None
+        self._last_tick_price = 0.0
+
     def _fetch_price(self) -> Optional[dict]:
         """Fetch current price — tries Binance API, falls back to ccxt, then simulation."""
         # Try 1: Binance public API
@@ -135,15 +147,26 @@ class LivePaperTrader:
         logger.info(f"Live paper trader stopped for {self.symbol}")
 
     async def _run_loop(self):
-        """Main trading loop — runs every interval_seconds."""
+        """Main trading loop — runs every interval_seconds with exponential backoff on errors."""
         while self._running:
             try:
                 await self._tick()
+                # Reset backoff on success
+                self._reconnect_attempts = 0
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._error_count += 1
                 logger.error(f"Tick error for {self.symbol}: {e}")
+                # Exponential backoff on repeated errors
+                self._reconnect_attempts += 1
+                delay = min(
+                    self._reconnect_base_delay * (2 ** (self._reconnect_attempts - 1)),
+                    self._reconnect_max_delay
+                )
+                logger.warning(f"Reconnect backoff: waiting {delay:.1f}s (attempt {self._reconnect_attempts})")
+                await asyncio.sleep(delay)
+                continue
 
             await asyncio.sleep(self.interval)
 
@@ -156,8 +179,32 @@ class LivePaperTrader:
             return
 
         price = ticker['last']
+        now = datetime.now()
+
+        # Duplicate tick detection — skip if same timestamp and same price
+        if self._last_tick_timestamp is not None:
+            if now == self._last_tick_timestamp and price == self._last_tick_price:
+                logger.debug(f"Duplicate tick skipped for {self.symbol} @ {price}")
+                return
+        self._last_tick_timestamp = now
+        self._last_tick_price = price
+
+        # Anomalous price detection — warn if >10% deviation from last price
+        if self._last_price > 0:
+            deviation = abs(price - self._last_price) / self._last_price
+            if deviation > 0.10:
+                logger.warning(
+                    f"Anomalous price for {self.symbol}: {price} deviates {deviation:.1%} "
+                    f"from last price {self._last_price}"
+                )
+                # 推送异常价格告警
+                get_notifier().risk_alert(
+                    f"{self.symbol} 异常价格检测",
+                    f"当前价格：${price:,.2f}\n上一价格：${self._last_price:,.2f}\n偏差：{deviation:.1%}"
+                )
+
         self._last_price = price
-        self._last_tick = datetime.now()
+        self._last_tick = now
         self._tick_count += 1
 
         # Update price history
@@ -199,7 +246,10 @@ class LivePaperTrader:
             df.set_index('timestamp', inplace=True)
 
             self.strategy.set_data(df)
-            self.strategy.init()
+            # Only init strategy once on the first valid bar
+            if not self._strategy_initialized:
+                self.strategy.init()
+                self._strategy_initialized = True
 
             # Get signal from strategy for the latest bar
             signal = self.strategy.next(len(df) - 1)

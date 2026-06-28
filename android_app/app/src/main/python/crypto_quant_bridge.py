@@ -19,11 +19,15 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     datefmt='%H:%M:%S',
     handlers=[
-        logging.FileHandler(LOG_FILE, mode='w'),
+        logging.FileHandler(LOG_FILE, mode='a'),
         logging.StreamHandler(sys.stderr),
     ]
 )
 logger = logging.getLogger("bridge")
+
+# Error propagation event — set when uvicorn crashes
+_server_error = threading.Event()
+_server_error_msg = None
 
 
 def init_paths():
@@ -67,6 +71,7 @@ def start_server(port=8000):
 
     # Start uvicorn in a daemon thread
     def _run_server():
+        global _server_error_msg
         try:
             import uvicorn
             config = uvicorn.Config(
@@ -82,6 +87,8 @@ def start_server(port=8000):
         except Exception as e:
             logger.error(f"SERVER CRASH: {e}")
             logger.error(traceback.format_exc())
+            _server_error_msg = str(e)
+            _server_error.set()
 
     t = threading.Thread(target=_run_server, daemon=True)
     t.start()

@@ -112,6 +112,12 @@
                 </div>
             </div>
 
+            <!-- Ticker Bar -->
+            <div class="ticker-bar" id="ticker-bar">
+              <div class="ticker-item"><span class="ticker-symbol">BTCUSDT</span><span class="ticker-price" id="ticker-btc-price">---</span><span class="ticker-change" id="ticker-btc-change">---</span></div>
+              <div class="ticker-item"><span class="ticker-symbol">ETHUSDT</span><span class="ticker-price" id="ticker-eth-price">---</span><span class="ticker-change" id="ticker-eth-change">---</span></div>
+            </div>
+
             <!-- Stats Cards -->
             <div class="stats-grid">
                 <div class="stat-card">
@@ -800,5 +806,13 @@
 <script src="/static/js/strategy_guide.js"></script>
 <script src="/static/js/app.js"></script>
 <!-- dashboard.js, strategy.js, strategy_store.js, backtest.js are lazy-loaded via app.js -->
+
+<!-- Quick Trade Bar -->
+<div class="quick-trade-bar" id="quick-trade-bar" style="display:none">
+  <input type="text" id="qt-amount" placeholder="数量" value="0.01">
+  <button class="btn-buy" onclick="quickBuy()">买入 LONG</button>
+  <button class="btn-sell" onclick="quickSell()">卖出 SHORT</button>
+</div>
+
 </body>
 </html>

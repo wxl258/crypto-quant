@@ -8,6 +8,8 @@ import os
 import io
 import itertools
 import asyncio
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Optional, List, Literal
 
@@ -27,6 +29,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
+
+# Dedicated thread pool for backtest comparison
+_backtest_compare_executor = ThreadPoolExecutor(max_workers=4)
 
 # ── Module availability flags (lazy-checked) ──
 _MODULE_STATUS = {}
@@ -408,6 +413,7 @@ def _parse_symbols() -> List[dict]:
     ]
 
 
+@functools.lru_cache(maxsize=1)
 def _generate_sample_klines(limit: int = 500):
     """Generate sample OHLCV data for demo/testing (no numpy dependency)."""
     import random
@@ -777,7 +783,7 @@ async def run_backtest_compare(request: BacktestRequest):
 
         loop = asyncio.get_running_loop()
         strategy_names = [s['name'] for s in StrategyRegistry.list_strategies()]
-        tasks = [loop.run_in_executor(None, _run_one, name) for name in strategy_names]
+        tasks = [loop.run_in_executor(_backtest_compare_executor, _run_one, name) for name in strategy_names]
         results = await asyncio.gather(*tasks)
 
         return {

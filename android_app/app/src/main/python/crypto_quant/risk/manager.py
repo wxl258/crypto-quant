@@ -69,6 +69,11 @@ class RiskManager:
         self.total_capital = initial_capital
         self.trading_paused = False
         self.pause_reason = ""
+        # 最大回撤熔断
+        self.peak_equity = initial_capital
+        self.max_drawdown_fuse_pct = 0.20
+        self._trading_paused = False
+        self._pause_reason = ""
     
     def set_capital(self, capital: float):
         """Update total capital"""
@@ -262,6 +267,17 @@ class RiskManager:
                 for p in self.positions.values()
             ]
         }
+    
+    def check_drawdown_fuse(self, current_equity: float) -> tuple:
+        """Check if max drawdown fuse is triggered. Returns (triggered, reason)."""
+        if current_equity > self.peak_equity:
+            self.peak_equity = current_equity
+        dd = (self.peak_equity - current_equity) / self.peak_equity if self.peak_equity > 0 else 0
+        if dd > self.max_drawdown_fuse_pct:
+            self._trading_paused = True
+            self._pause_reason = f"最大回撤熔断: {dd:.1%}"
+            return (True, self._pause_reason)
+        return (False, "")
     
     def pause_trading(self, reason: str):
         """Pause trading with reason"""

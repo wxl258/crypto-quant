@@ -17,7 +17,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
-import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
@@ -30,8 +30,10 @@ class MainActivity : AppCompatActivity() {
     private val pythonReady = AtomicBoolean(false)
     private val serverStarted = AtomicBoolean(false)
     private val serverPort = 8000
-    private val executor = Executors.newSingleThreadExecutor()
+    private val executor = ScheduledThreadPoolExecutor(1)
     private val handler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var isDestroyed = false
     private val maxRetries = 90
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,8 +49,7 @@ class MainActivity : AppCompatActivity() {
         setupWebView()
         createNotificationChannel()
 
-        // 延迟启动 Python 服务器，确保 Activity 完全初始化
-        handler.postDelayed({ startPythonServer() }, 200)
+        startPythonServer()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -152,6 +153,7 @@ class MainActivity : AppCompatActivity() {
     private fun pollServerHealth() {
         updateUI("等待交易引擎就绪...", "尝试连接本地服务")
         for (i in 1..maxRetries) {
+            if (isDestroyed) return
             try {
                 val url = java.net.URL("http://127.0.0.1:$serverPort/health")
                 val conn = url.openConnection() as java.net.HttpURLConnection
@@ -208,6 +210,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        isDestroyed = true
+        executor.execute {
+            try {
+                val url = java.net.URL("http://127.0.0.1:$serverPort/shutdown")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 2000
+                conn.readTimeout = 2000
+                conn.requestMethod = "GET"
+                conn.responseCode
+                conn.disconnect()
+            } catch (_: Exception) {}
+        }
         executor.shutdownNow()
         try {
             webView.stopLoading()
