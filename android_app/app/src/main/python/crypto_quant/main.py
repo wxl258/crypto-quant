@@ -48,7 +48,10 @@ app.include_router(evolution_router)
 
 # Static files
 static_dir = Path(__file__).parent / "web" / "static"
-static_dir.mkdir(parents=True, exist_ok=True)
+try:
+    static_dir.mkdir(parents=True, exist_ok=True)
+except (OSError, PermissionError):
+    pass  # Android may not allow mkdir in app directory
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 

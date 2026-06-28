@@ -49,6 +49,8 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.10"
+        // 提取所有包以确保数据文件（yaml/html/css/js）可用
+        extractPackages("crypto_quant")
         pip {
             install("fastapi")
             install("uvicorn")
