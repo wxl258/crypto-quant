@@ -5,14 +5,23 @@ import numpy as np
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, date
-from zoneinfo import ZoneInfo
 import logging
 
 from config import get_timezone
 
 logger = logging.getLogger(__name__)
 
-_TZ = ZoneInfo(get_timezone())
+# 安全获取时区 — Android/Chaquopy 可能缺少 zoneinfo 数据
+try:
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo(get_timezone())
+except Exception:
+    logger.warning(f"ZoneInfo not available, falling back to UTC")
+    try:
+        from datetime import timezone, timedelta
+        _TZ = timezone(timedelta(hours=8))  # Asia/Shanghai
+    except Exception:
+        _TZ = None
 
 
 @dataclass

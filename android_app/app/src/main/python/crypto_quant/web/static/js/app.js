@@ -3,6 +3,14 @@
  */
 'use strict';
 
+// 防御性检查：确保依赖函数存在
+if (typeof friendlyError !== 'function') {
+    window.friendlyError = function(msg) { return '⚠️ ' + (msg || '未知错误'); };
+}
+if (typeof showToast !== 'function') {
+    window.showToast = function(msg, type) { console.log('[' + (type || 'info') + ']', msg); };
+}
+
 const API = {
     async get(url) {
         const res = await fetch(url);
@@ -176,6 +184,21 @@ const _WS_MIN_DELAY = 3000;       // 3 seconds minimum
 const _WS_MAX_DELAY = 30000;      // 30 seconds cap
 
 function connectWebSocket() {
+    // 先检查后端 HTTP API 是否可用，避免无效的 WebSocket 连接循环
+    fetch('/api/mode').then(r => {
+        if (!r.ok) throw new Error('backend offline');
+        return r.json();
+    }).catch(() => {
+        // 后端不可用，延迟重试
+        scheduleWSReconnect();
+        return;
+    }).then(data => {
+        if (!data) return; // backend offline, already handled
+        _doConnectWebSocket();
+    });
+}
+
+function _doConnectWebSocket() {
     // Clean up existing sockets before creating new ones
     if (_wsAccount) {
         _wsAccount.onclose = null;

@@ -10,10 +10,17 @@
 </head>
 <body>
 <script>
-// 检查是否完成引导
-if (!localStorage.getItem('onboarding_done')) {
+// 检查是否完成引导 — 防循环保护
+(function() {
+    if (localStorage.getItem('onboarding_done')) return;
+    // 防止重定向循环：检查是否已经在 welcome.html
+    if (window.location.pathname.endsWith('welcome.html')) return;
+    // 防止短时间内重复重定向
+    var lastRedirect = sessionStorage.getItem('_redirect_ts');
+    if (lastRedirect && Date.now() - parseInt(lastRedirect) < 5000) return;
+    sessionStorage.setItem('_redirect_ts', Date.now().toString());
     window.location.href = '/static/welcome.html';
-}
+})();
 </script>
 <div class="app">
     <!-- Mobile hamburger button -->

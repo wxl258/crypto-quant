@@ -67,6 +67,8 @@ async def startup_event():
         from execution.scheduler import scheduler
         await scheduler.start()
         logger.info("Trading scheduler started")
+    except ImportError as e:
+        logger.warning(f"Scheduler import failed (missing dependency): {e}")
     except Exception as e:
         logger.warning(f"Scheduler start failed (non-critical): {e}")
 
