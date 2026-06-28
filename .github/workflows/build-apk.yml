@@ -40,9 +40,9 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android_app/**/*.gradle*', 'android_app/**/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-v2-${{ hashFiles('android_app/**/*.gradle*', 'android_app/**/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-${{ runner.os }}-
+            gradle-${{ runner.os }}-v2-
 
       - name: 缓存 Chaquopy Python 包
         uses: actions/cache@v4
@@ -50,16 +50,20 @@ jobs:
           path: |
             ~/.chaquopy
             android_app/app/build/chaquopy
-          key: chaquopy-${{ runner.os }}-v1-${{ hashFiles('android_app/app/build.gradle.kts') }}
+          key: chaquopy-${{ runner.os }}-v2-${{ hashFiles('android_app/app/build.gradle.kts') }}
           restore-keys: |
-            chaquopy-${{ runner.os }}-v1-
+            chaquopy-${{ runner.os }}-v2-
 
       - name: 授予 gradlew 执行权限
         run: chmod +x android_app/gradlew
 
+      - name: 清理构建缓存
+        working-directory: android_app
+        run: ./gradlew clean --no-daemon
+
       - name: 构建 Debug APK
         working-directory: android_app
-        run: ./gradlew assembleDebug --stacktrace --warning-mode all
+        run: ./gradlew assembleDebug --no-daemon --stacktrace --warning-mode all
 
       - name: 列出 APK 文件
         run: |

@@ -32,7 +32,7 @@ class MainActivity : AppCompatActivity() {
     private val serverPort = 8000
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
-    private val maxRetries = 90  // 90 * 500ms = 45s max wait
+    private val maxRetries = 90
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +46,9 @@ class MainActivity : AppCompatActivity() {
 
         setupWebView()
         createNotificationChannel()
-        startPythonServer()
+
+        // 延迟启动 Python 服务器，确保 Activity 完全初始化
+        handler.postDelayed({ startPythonServer() }, 200)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -65,34 +67,17 @@ class MainActivity : AppCompatActivity() {
                 useWideViewPort = true
                 loadWithOverviewMode = true
             }
-
-            // 关键修复：只在服务器就绪后才处理页面事件
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    if (pythonReady.get()) {
-                        showWebView()
-                    }
-                }
-
-                // 不自动重试——由轮询线程负责
-                override fun onReceivedError(
-                    view: WebView?,
-                    errorCode: Int,
-                    description: String?,
-                    failingUrl: String?
-                ) {
-                    // 静默忽略加载过程中的错误
-                    // 轮询线程会在服务器就绪后重新 loadUrl
+                    if (pythonReady.get()) showWebView()
                 }
             }
-
             webChromeClient = WebChromeClient()
         }
     }
 
     @SuppressLint("SetTextI18n")
     private fun startPythonServer() {
-        // 防止重复启动
         if (serverStarted.getAndSet(true)) return
 
         loadingView.visibility = View.VISIBLE
@@ -101,69 +86,94 @@ class MainActivity : AppCompatActivity() {
         detailText.text = ""
         progressBar.visibility = View.VISIBLE
 
-        // Python 已由 CryptoQuantApp 在 Application.onCreate() 中初始化
-        // 所有 Python 调用必须在主线程进行 (Chaquopy 限制)
+        // 在后台线程启动 Python 服务器并轮询
+        executor.execute {
+            try {
+                // Step 1: 在主线程获取 Python 实例和模块引用
+                val latch = java.util.concurrent.CountDownLatch(1)
+                var py: Python? = null
+                var module: com.chaquo.python.PyObject? = null
+                var initError: Exception? = null
 
-        try {
-            updateUI("正在启动交易引擎...", "加载量化系统模块")
+                handler.post {
+                    try {
+                        py = Python.getInstance()
+                        module = py!!.getModule("crypto_quant_bridge")
+                    } catch (e: Exception) {
+                        initError = e
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+                latch.await()
 
-            val py = Python.getInstance()
-            val module = py.getModule("crypto_quant_bridge")
-            module.callAttr("start_server", serverPort)
+                if (initError != null) {
+                    updateUI("启动失败: ${initError!!.message}", initError!!.javaClass.simpleName)
+                    progressBar.visibility = View.GONE
+                    serverStarted.set(false)
+                    return@execute
+                }
 
-            // Start polling in background thread (HTTP calls are fine off main thread)
-            executor.execute {
+                updateUI("正在启动交易引擎...", "加载量化系统模块")
+
+                // Step 2: 在主线程调用 start_server (包含 import main)
+                val resultLatch = java.util.concurrent.CountDownLatch(1)
+                var result: Any? = null
+                var callError: Exception? = null
+
+                handler.post {
+                    try {
+                        result = module!!.callAttr("start_server", serverPort)
+                    } catch (e: Exception) {
+                        callError = e
+                    } finally {
+                        resultLatch.countDown()
+                    }
+                }
+                resultLatch.await()
+
+                if (callError != null) {
+                    updateUI("启动失败: ${callError!!.message}", callError!!.javaClass.simpleName)
+                    progressBar.visibility = View.GONE
+                    serverStarted.set(false)
+                    return@execute
+                }
+
+                // Step 3: 后台线程轮询 HTTP
                 pollServerHealth()
+            } catch (e: Exception) {
+                updateUI("启动失败: ${e.message}", e.javaClass.simpleName)
+                progressBar.visibility = View.GONE
+                serverStarted.set(false)
             }
-
-        } catch (e: Exception) {
-            val errMsg = e.message ?: "未知错误"
-            val errDetail = e.cause?.message ?: e.javaClass.simpleName
-            e.printStackTrace()
-            updateUI("启动失败: $errMsg", errDetail)
-            progressBar.visibility = View.GONE
-            serverStarted.set(false)
         }
     }
 
     private fun pollServerHealth() {
         updateUI("等待交易引擎就绪...", "尝试连接本地服务")
-
-        var connected = false
         for (i in 1..maxRetries) {
             try {
                 val url = java.net.URL("http://127.0.0.1:$serverPort/health")
                 val conn = url.openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 2000
                 conn.readTimeout = 2000
-                val code = conn.responseCode
-                conn.disconnect()
-                if (code == 200) {
-                    connected = true
-                    break
+                if (conn.responseCode == 200) {
+                    conn.disconnect()
+                    pythonReady.set(true)
+                    updateUI("交易引擎已启动！", "正在加载界面...")
+                    handler.post { webView.loadUrl("http://127.0.0.1:$serverPort") }
+                    return
                 }
-            } catch (_: Exception) {
-                // Server not ready yet, keep polling
-            }
-
+                conn.disconnect()
+            } catch (_: Exception) {}
             if (i % 5 == 0) {
                 updateUI("等待交易引擎就绪... ($i/$maxRetries)", "正在启动量化系统服务")
             }
             try { Thread.sleep(500) } catch (_: InterruptedException) { break }
         }
-
-        if (connected) {
-            pythonReady.set(true)
-            updateUI("交易引擎已启动！", "正在加载界面...")
-
-            handler.post {
-                webView.loadUrl("http://127.0.0.1:$serverPort")
-            }
-        } else {
-            updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
-            progressBar.visibility = View.GONE
-            serverStarted.set(false)
-        }
+        updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
+        progressBar.visibility = View.GONE
+        serverStarted.set(false)
     }
 
     @SuppressLint("SetTextI18n")
@@ -188,17 +198,13 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 description = "CryptoQuant 量化交易引擎服务通知"
             }
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(channel)
         }
     }
 
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            moveTaskToBack(true)
-        }
+        if (webView.canGoBack()) webView.goBack() else moveTaskToBack(true)
     }
 
     override fun onDestroy() {
@@ -209,14 +215,8 @@ class MainActivity : AppCompatActivity() {
             webView.clearHistory()
             webView.removeAllViews()
             webView.destroy()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         super.onDestroy()
-    }
-
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        super.onConfigurationChanged(newConfig)
-        webView.post { webView.requestLayout() }
     }
 
     companion object {
