@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -24,9 +26,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var loadingView: View
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
+    private lateinit var detailText: TextView
     private var pythonReady = false
     private val serverPort = 8000
     private val executor = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
+    private var retryCount = 0
+    private val maxRetries = 60
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +42,7 @@ class MainActivity : AppCompatActivity() {
         loadingView = findViewById(R.id.loadingView)
         progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
+        detailText = findViewById(R.id.detailText)
 
         setupWebView()
         createNotificationChannel()
@@ -72,7 +79,6 @@ class MainActivity : AppCompatActivity() {
                     description: String?,
                     failingUrl: String?
                 ) {
-                    // Retry loading if server might not be ready yet
                     if (!pythonReady) {
                         view?.postDelayed({
                             view?.loadUrl("http://127.0.0.1:$serverPort")
@@ -90,46 +96,81 @@ class MainActivity : AppCompatActivity() {
         loadingView.visibility = View.VISIBLE
         webView.visibility = View.GONE
         statusText.text = getString(R.string.loading_message)
+        detailText.text = ""
         progressBar.visibility = View.VISIBLE
 
         executor.execute {
             try {
-                this@MainActivity.runOnUiThread {
-                    statusText.text = "正在初始化 Python 环境..."
-                }
+                updateUI("正在初始化 Python 环境...", "")
 
-                // Initialize Python if not already done
+                // Initialize Python
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(this@MainActivity))
                 }
 
-                this@MainActivity.runOnUiThread {
-                    statusText.text = "正在启动交易引擎..."
-                }
+                updateUI("正在启动交易引擎...", "加载量化系统模块")
 
-                // Get Python instance and run the bridge
+                // Get Python instance and run the bridge (returns immediately)
                 val py = Python.getInstance()
                 val module = py.getModule("crypto_quant_bridge")
                 module.callAttr("start_server", serverPort)
 
-                this@MainActivity.runOnUiThread {
-                    pythonReady = true
-                    statusText.text = "交易引擎已启动，正在加载界面..."
-                    // Load the web interface
-                    webView.loadUrl("http://127.0.0.1:$serverPort")
+                // Poll for server readiness
+                updateUI("等待交易引擎就绪...", "尝试连接本地服务")
+                pythonReady = false
+
+                for (i in 1..maxRetries) {
+                    try {
+                        val url = java.net.URL("http://127.0.0.1:$serverPort/health")
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 2000
+                        conn.readTimeout = 2000
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        if (code == 200) {
+                            pythonReady = true
+                            break
+                        }
+                    } catch (e: Exception) {
+                        // Server not ready yet
+                    }
+
+                    val msg = "等待交易引擎就绪... ($i/$maxRetries)"
+                    updateUI(msg, "正在启动量化系统服务")
+                    Thread.sleep(500)
+                }
+
+                if (pythonReady) {
+                    updateUI("交易引擎已启动！", "正在加载界面...")
+                    handler.post {
+                        webView.loadUrl("http://127.0.0.1:$serverPort")
+                    }
+                } else {
+                    updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
+                    progressBar.visibility = View.GONE
                 }
 
             } catch (e: Exception) {
+                val errMsg = e.message ?: "未知错误"
+                val errDetail = e.cause?.message ?: e.javaClass.simpleName
                 e.printStackTrace()
-                this@MainActivity.runOnUiThread {
-                    statusText.text = "启动失败: ${e.message}"
-                    progressBar.visibility = View.GONE
-                    // Show retry option
+                updateUI("启动失败: $errMsg", errDetail)
+                progressBar.visibility = View.GONE
+                handler.post {
                     statusText.setOnClickListener {
+                        retryCount++
                         startPythonServer()
                     }
                 }
             }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateUI(status: String, detail: String) {
+        handler.post {
+            statusText.text = status
+            detailText.text = detail
         }
     }
 
@@ -156,15 +197,12 @@ class MainActivity : AppCompatActivity() {
         if (webView.canGoBack()) {
             webView.goBack()
         } else {
-            // Minimize instead of closing to keep server running
             moveTaskToBack(true)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Note: Python server keeps running in background
-        // It will be cleaned up when the process is killed
     }
 
     companion object {
