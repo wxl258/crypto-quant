@@ -168,13 +168,14 @@ def get_db_path() -> str:
         try:
             from android.storage import app_storage_path
             base = app_storage_path()
-            return os.path.join(base, raw)
+            result = os.path.join(base, raw)
+            os.makedirs(os.path.dirname(result), exist_ok=True)
+            return result
         except (ImportError, Exception):
             # Use HOME directory (Chaquopy standard on Android)
             home = os.environ.get("HOME", str(Path(__file__).parent))
-            result = os.path.join(home, raw)
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(result), exist_ok=True)
+            # 简化路径，直接用 market.db
+            result = os.path.join(home, "market.db")
             return result
     return raw
 

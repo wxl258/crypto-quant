@@ -52,7 +52,12 @@ try:
     static_dir.mkdir(parents=True, exist_ok=True)
 except (OSError, PermissionError):
     pass  # Android may not allow mkdir in app directory
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Only mount static files if directory exists
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+else:
+    logger.warning(f"Static directory not found: {static_dir}")
 
 
 @app.on_event("startup")
@@ -80,8 +85,21 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """Serve main page"""
-    from fastapi.responses import FileResponse
-    return FileResponse(str(static_dir / "index.html"))
+    from fastapi.responses import FileResponse, HTMLResponse
+    index_path = static_dir / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    # Fallback: return simple HTML if index.html not found
+    return HTMLResponse("""
+    <!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>CryptoQuant</title><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>body{font-family:sans-serif;background:#1a1a2e;color:#eee;display:flex;
+    justify-content:center;align-items:center;height:100vh;margin:0}
+    .box{text-align:center}h1{color:#0af}button{padding:12px 24px;background:#0af;
+    border:none;border-radius:8px;color:#000;font-size:16px;cursor:pointer}</style></head>
+    <body><div class="box"><h1>🚀 CryptoQuant</h1>
+    <p>量化交易系统已就绪</p><p>API 状态正常，请检查网络连接</p>
+    <button onclick="location.reload()">刷新页面</button></div></body></html>""")
 
 
 @app.get("/health")
