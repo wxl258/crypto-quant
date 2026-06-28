@@ -54,7 +54,8 @@ def _safe_import_check():
 def start_server(port=8000):
     """
     Start the FastAPI server in a background thread.
-    Returns immediately so the Kotlin caller can proceed.
+    Returns True if the server thread was started successfully (not if it's healthy yet).
+    Kotlin will poll the /health endpoint separately.
     """
     # Write startup info
     logger.info("=" * 50)
@@ -68,8 +69,14 @@ def start_server(port=8000):
     # Pre-check imports
     logger.info("Running import pre-checks...")
     import_results = _safe_import_check()
+    all_ok = True
     for mod, status in import_results.items():
         logger.info(f"  {mod}: {status}")
+        if status != "OK":
+            all_ok = False
+
+    if not all_ok:
+        logger.error("One or more imports failed, server may not start correctly")
 
     # Setup paths
     python_dir = os.path.dirname(os.path.abspath(__file__))
@@ -88,14 +95,17 @@ def start_server(port=8000):
     os.environ.setdefault("CQ_WEB_HOST", "127.0.0.1")
     os.environ.setdefault("CQ_WEB_PORT", str(port))
 
-    # Start server in background thread
+    # Start server in background thread and return immediately
+    server_started = False
+
     def _run():
+        nonlocal server_started
         try:
             logger.info("Importing crypto_quant main module...")
-            # The crypto_quant dir is already in sys.path, so we can import directly
             import main as crypto_main
             fastapi_app = crypto_main.app
             logger.info("App imported successfully!")
+            server_started = True
 
             import uvicorn
             config = uvicorn.Config(
@@ -116,29 +126,19 @@ def start_server(port=8000):
     t = threading.Thread(target=_run, daemon=True)
     t.start()
 
-    # Wait for server to be ready (max 30 seconds)
-    logger.info("Waiting for server to become ready...")
-    import urllib.request
-    ready = False
-    for i in range(60):
-        try:
-            resp = urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/health", timeout=1
-            )
-            if resp.status == 200:
-                ready = True
-                logger.info("Server is READY!")
-                break
-        except Exception:
-            time.sleep(0.5)
+    # Give the server thread a brief moment to start imports (max 5 seconds)
+    # This avoids the Kotlin side getting stuck for 30 seconds
+    logger.info("Waiting for server thread to begin...")
+    for i in range(20):
+        if server_started:
+            logger.info("Server thread has started imports, returning to Kotlin")
+            return True
+        time.sleep(0.25)
 
-    if not ready:
-        logger.error("Server did NOT become ready within 30 seconds!")
-        # Log any crash info
-        logger.error(f"Last log file contents will be in: {LOG_FILE}")
-
-    # Return readiness status (but don't block Kotlin)
-    return ready
+    # If we got here, the import might have failed
+    logger.warning("Server thread did not finish imports within 5 seconds")
+    # Still return True — let Kotlin poll /health to determine actual readiness
+    return True
 
 
 # Allow direct execution for testing

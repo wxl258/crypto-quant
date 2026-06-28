@@ -19,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
 
@@ -27,12 +28,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var detailText: TextView
-    private var pythonReady = false
+    private val pythonReady = AtomicBoolean(false)
+    private val serverStarted = AtomicBoolean(false)
     private val serverPort = 8000
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
-    private var retryCount = 0
-    private val maxRetries = 60
+    private val maxRetries = 90  // 90 * 500ms = 45s max wait
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         startPythonServer()
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         webView.apply {
             settings.apply {
@@ -56,7 +58,6 @@ class MainActivity : AppCompatActivity() {
                 domStorageEnabled = true
                 allowFileAccess = false
                 allowContentAccess = false
-                // 本地 127.0.0.1 是回环地址，不需要 cleartext 特殊处理
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 setSupportZoom(true)
@@ -66,25 +67,23 @@ class MainActivity : AppCompatActivity() {
                 loadWithOverviewMode = true
             }
 
+            // 关键修复：只在服务器就绪后才处理页面事件
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    if (pythonReady) {
+                    if (pythonReady.get()) {
                         showWebView()
                     }
                 }
 
+                // 不自动重试——由轮询线程负责
                 override fun onReceivedError(
                     view: WebView?,
                     errorCode: Int,
                     description: String?,
                     failingUrl: String?
                 ) {
-                    if (!pythonReady) {
-                        view?.postDelayed({
-                            view?.loadUrl("http://127.0.0.1:$serverPort")
-                        }, 2000)
-                    }
+                    // 静默忽略加载过程中的错误
+                    // 轮询线程会在服务器就绪后重新 loadUrl
                 }
             }
 
@@ -94,6 +93,9 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n")
     private fun startPythonServer() {
+        // 防止重复启动
+        if (serverStarted.getAndSet(true)) return
+
         loadingView.visibility = View.VISIBLE
         webView.visibility = View.GONE
         statusText.text = getString(R.string.loading_message)
@@ -109,23 +111,30 @@ class MainActivity : AppCompatActivity() {
             val errMsg = e.message ?: "未知错误"
             updateUI("Python 初始化失败: $errMsg", e.javaClass.simpleName)
             progressBar.visibility = View.GONE
+            serverStarted.set(false)
             return
         }
 
-        // Step 2: Start Python server and poll health on background thread
+        // Step 2: Start Python server on background thread
         executor.execute {
             try {
                 updateUI("正在启动交易引擎...", "加载量化系统模块")
 
-                // Get Python instance and run the bridge (returns immediately)
                 val py = Python.getInstance()
                 val module = py.getModule("crypto_quant_bridge")
-                module.callAttr("start_server", serverPort)
+                val bridgeReady = module.callAttr("start_server", serverPort) as? Boolean ?: false
 
-                // Poll for server readiness
+                if (!bridgeReady) {
+                    updateUI("交易引擎启动失败", "Python 服务器未能启动，请查看日志")
+                    progressBar.visibility = View.GONE
+                    serverStarted.set(false)
+                    return@execute
+                }
+
+                // Poll health endpoint
                 updateUI("等待交易引擎就绪...", "尝试连接本地服务")
-                pythonReady = false
 
+                var connected = false
                 for (i in 1..maxRetries) {
                     try {
                         val url = java.net.URL("http://127.0.0.1:$serverPort/health")
@@ -135,26 +144,31 @@ class MainActivity : AppCompatActivity() {
                         val code = conn.responseCode
                         conn.disconnect()
                         if (code == 200) {
-                            pythonReady = true
+                            connected = true
                             break
                         }
-                    } catch (e: Exception) {
-                        // Server not ready yet
+                    } catch (_: Exception) {
+                        // Server not ready yet, keep polling
                     }
 
-                    val msg = "等待交易引擎就绪... ($i/$maxRetries)"
-                    updateUI(msg, "正在启动量化系统服务")
+                    if (i % 5 == 0) {
+                        updateUI("等待交易引擎就绪... ($i/$maxRetries)", "正在启动量化系统服务")
+                    }
                     Thread.sleep(500)
                 }
 
-                if (pythonReady) {
+                if (connected) {
+                    pythonReady.set(true)
                     updateUI("交易引擎已启动！", "正在加载界面...")
+
+                    // 在主线程加载页面
                     handler.post {
                         webView.loadUrl("http://127.0.0.1:$serverPort")
                     }
                 } else {
                     updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
                     progressBar.visibility = View.GONE
+                    serverStarted.set(false)
                 }
 
             } catch (e: Exception) {
@@ -163,12 +177,7 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
                 updateUI("启动失败: $errMsg", errDetail)
                 progressBar.visibility = View.GONE
-                handler.post {
-                    statusText.setOnClickListener {
-                        retryCount++
-                        startPythonServer()
-                    }
-                }
+                serverStarted.set(false)
             }
         }
     }
@@ -209,7 +218,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // Clean up executor and WebView to prevent leaks and port conflicts
         executor.shutdownNow()
         try {
             webView.stopLoading()
@@ -217,15 +225,13 @@ class MainActivity : AppCompatActivity() {
             webView.clearHistory()
             webView.removeAllViews()
             webView.destroy()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
         }
         super.onDestroy()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
-        // Re-layout WebView on rotation
         webView.post { webView.requestLayout() }
     }
 
