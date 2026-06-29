@@ -66,8 +66,14 @@ class QuantForegroundService : Service() {
 
                 updateStatus("正在启动交易引擎...", "加载量化系统模块")
                 val py = Python.getInstance()
-                val module = py.getModule("crypto_quant_bridge")
-                module.callAttr("start_server", serverPort)
+                try {
+                    val module = py.getModule("crypto_quant_bridge")
+                    module.callAttr("start_server", serverPort)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Python bridge start failed", e)
+                    updateStatus("启动失败: ${e.message}", e.javaClass.simpleName)
+                    return@Thread
+                }
 
                 // 轮询等待服务器就绪
                 updateStatus("等待交易引擎就绪...", "尝试连接本地服务")
