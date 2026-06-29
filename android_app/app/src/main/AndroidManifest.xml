@@ -48,7 +48,7 @@
         <service
             android:name=".service.QuantForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|specialUse" />
+            android:foregroundServiceType="dataSync" />
 
         <!-- 开机自启广播接收器 -->
         <receiver

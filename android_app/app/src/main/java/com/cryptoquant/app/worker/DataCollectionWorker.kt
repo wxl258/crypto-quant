@@ -23,7 +23,8 @@ class DataCollectionWorker(
             Log.d(TAG, "开始定时数据采集...")
 
             if (!Python.isStarted()) {
-                Python.start(AndroidPlatform(applicationContext))
+                Log.w(TAG, "Python 未启动，跳过数据采集")
+                return Result.success()
             }
 
             val py = Python.getInstance()

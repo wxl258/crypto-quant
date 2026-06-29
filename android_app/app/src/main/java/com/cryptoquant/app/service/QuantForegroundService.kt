@@ -61,7 +61,20 @@ class QuantForegroundService : Service() {
                 updateStatus("正在初始化 Python 环境...", "")
 
                 if (!Python.isStarted()) {
-                    Python.start(AndroidPlatform(this@QuantForegroundService))
+                    // Chaquopy 要求 Python.start 在主线程执行
+                    val latch = java.util.concurrent.CountDownLatch(1)
+                    val holder = arrayOf<Exception?>(null)
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        try {
+                            Python.start(AndroidPlatform(this@QuantForegroundService))
+                        } catch (e: Exception) {
+                            holder[0] = e
+                        } finally {
+                            latch.countDown()
+                        }
+                    }
+                    latch.await()
+                    holder[0]?.let { throw it }
                 }
 
                 updateStatus("正在启动交易引擎...", "加载量化系统模块")

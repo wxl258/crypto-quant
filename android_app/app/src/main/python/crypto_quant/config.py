@@ -12,9 +12,21 @@ Examples:
   CQ_BINANCE_API_KEY=xxx          → overrides binance.api_key
 """
 import os
-import yaml
 from pathlib import Path
 from typing import Any
+
+# yaml 延迟导入 — Android/Chaquopy 上 pyyaml C 扩展可能不可用
+_yaml = None
+
+def _get_yaml():
+    global _yaml
+    if _yaml is None:
+        try:
+            import yaml as _yaml_mod
+            _yaml = _yaml_mod
+        except ImportError:
+            _yaml = False
+    return _yaml if _yaml is not False else None
 
 # ---------------------------------------------------------------------------
 # Module-level cache for the loaded (and env-overridden) configuration dict.
@@ -75,9 +87,12 @@ def _load_config() -> dict[str, Any]:
 
     # 尝试加载 YAML 配置文件
     try:
+        yaml_mod = _get_yaml()
+        if yaml_mod is None:
+            raise ImportError("yaml not available")
         with open(config_path, "r", encoding="utf-8") as f:
-            config: dict[str, Any] = yaml.safe_load(f)
-    except (FileNotFoundError, IOError, yaml.YAMLError) as e:
+            config: dict[str, Any] = yaml_mod.safe_load(f)
+    except Exception as e:
         # Android 环境或文件缺失时的 fallback：使用内嵌默认配置
         import logging
         logging.getLogger(__name__).warning(
