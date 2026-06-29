@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -90,6 +91,9 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 android.util.Log.w("MainActivity", "WorkManager schedule failed", e)
             }
+
+            // 请求电池优化豁免（防止 Doze 模式杀死后台服务）
+            requestBatteryOptimizationExemption()
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "onCreate failed", e)
             // 确保用户看到错误信息而非闪退
@@ -239,6 +243,26 @@ class MainActivity : AppCompatActivity() {
         } else {
             // 退到后台，但服务继续运行
             moveTaskToBack(true)
+        }
+    }
+
+    // ── 电池优化豁免 ──
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                    android.util.Log.w("MainActivity", "App not in battery optimization whitelist, requesting...")
+                    @SuppressLint("BatteryLife")
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Battery optimization request failed", e)
+            }
         }
     }
 

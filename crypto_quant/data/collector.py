@@ -206,7 +206,7 @@ class MarketDataCollector:
 def collect_recent_data():
     """
     供 Android WorkManager 调用的同步入口。
-    采集默认交易对的最近数据到本地数据库。
+    采集默认交易对的多周期数据到本地数据库。
     """
     import logging
     logger = logging.getLogger("crypto_quant.data.collector")
@@ -217,18 +217,24 @@ def collect_recent_data():
         symbols = config.get("symbols", ["BTC/USDT", "ETH/USDT"])
         exchange = config.get("exchange", "binance")
         testnet = config.get("mode", "paper") == "paper"
+        intervals = config.get("data", {}).get("kline_intervals", ["15m", "1h", "4h", "1d"])
     except Exception:
         symbols = ["BTC/USDT", "ETH/USDT"]
         exchange = "binance"
         testnet = True
+        intervals = ["15m", "1h", "4h", "1d"]
 
     store = DataStore()
     collector = MarketDataCollector(store, testnet=testnet, exchange_id=exchange)
 
     for symbol in symbols:
-        try:
-            df = collector.fetch_and_store(symbol, "15m", limit=200)
-            if df is not None:
-                logger.info(f"WorkManager 采集: {symbol} 15m × {len(df)} 条")
-        except Exception as e:
-            logger.warning(f"采集 {symbol} 失败: {e}")
+        for interval in intervals:
+            try:
+                # 不同周期取不同数据量
+                limit_map = {"1m": 500, "5m": 300, "15m": 200, "1h": 100, "4h": 50, "1d": 30}
+                limit = limit_map.get(interval, 100)
+                df = collector.fetch_and_store(symbol, interval, limit=limit)
+                if df is not None:
+                    logger.info(f"WorkManager 采集: {symbol} {interval} × {len(df)} 条")
+            except Exception as e:
+                logger.warning(f"采集 {symbol} {interval} 失败: {e}")

@@ -53,7 +53,20 @@ class PaperTradingSimulator:
             sym_price = self._current_price.get(sym)
             if sym_price is not None:
                 if self.risk_manager.check_stop_conditions(sym, sym_price):
+                    pos = self.positions.get(sym, {})
+                    side = pos.get('side', 'LONG')
+                    entry = pos.get('entry_price', 0)
                     self.close_position(sym, sym_price, "止损/止盈触发", timestamp)
+                    # 发送止损通知
+                    try:
+                        from execution.notifier import get_notifier
+                        pnl = (sym_price - entry) if side == 'LONG' else (entry - sym_price)
+                        get_notifier().risk_alert(
+                            f"{sym} 止损/止盈触发",
+                            f"方向: {side}\n入场: ${entry:,.2f}\n出场: ${sym_price:,.2f}\n盈亏: ${pnl:,.2f}"
+                        )
+                    except Exception:
+                        pass
         
         # Update equity tracking
         if timestamp:

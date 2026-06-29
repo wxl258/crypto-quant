@@ -449,6 +449,15 @@ class RiskManager:
         self.pause_reason = reason
         self.pause_until = datetime.now(_TZ) + timedelta(hours=1)
         logger.warning(f"Trading paused: {reason}")
+        # 发送熔断通知
+        try:
+            from execution.notifier import get_notifier
+            get_notifier().risk_alert(
+                "交易熔断",
+                f"原因: {reason}\n暂停至: {self.pause_until.strftime('%H:%M:%S')}\n1小时后自动恢复"
+            )
+        except Exception:
+            pass
 
     def resume_trading(self) -> None:
         """Resume trading after a pause."""

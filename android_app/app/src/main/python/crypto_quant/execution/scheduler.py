@@ -209,13 +209,30 @@ class TradingScheduler:
         logger.info("Trading scheduler stopped")
 
     async def _check_reports(self) -> None:
-        """Periodically check if reports need to be generated.
+        """Periodically check if reports need to be generated and reset daily stats.
 
         Runs every 60 seconds while the scheduler is active. For each
         reporter whose ``should_report()`` returns ``True``, a report is
         generated, logged, and stored in ``_latest_reports`` for API access.
+
+        Also checks if the day has changed and resets daily risk statistics.
         """
+        import datetime as _dt
+        _last_reset_day: int | None = None
+
         while self._running:
+            # 每日 0 点重置风险统计
+            now = _dt.datetime.now()
+            today = now.day
+            if _last_reset_day is not None and today != _last_reset_day:
+                for name, trader in self._traders.items():
+                    try:
+                        trader.simulator.risk_manager._reset_daily_stats()
+                        logger.info(f"Daily risk stats reset for trader '{name}'")
+                    except Exception:
+                        pass
+            _last_reset_day = today
+
             for name, reporter in self._reporters.items():
                 if reporter.should_report():
                     report = reporter.generate_report()
