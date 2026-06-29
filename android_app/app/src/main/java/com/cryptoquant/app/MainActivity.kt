@@ -66,31 +66,36 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        try {
+            setContentView(R.layout.activity_main)
 
-        webView = findViewById(R.id.webView)
-        loadingView = findViewById(R.id.loadingView)
-        progressBar = findViewById(R.id.progressBar)
-        statusText = findViewById(R.id.statusText)
-        detailText = findViewById(R.id.detailText)
+            webView = findViewById(R.id.webView)
+            loadingView = findViewById(R.id.loadingView)
+            progressBar = findViewById(R.id.progressBar)
+            statusText = findViewById(R.id.statusText)
+            detailText = findViewById(R.id.detailText)
 
-        setupWebView()
-        createNotificationChannel()
+            setupWebView()
+            createNotificationChannel()
 
-        // 请求通知权限（Android 13+）
-        requestNotificationPermissionIfNeeded()
+            // 请求通知权限（Android 13+）
+            requestNotificationPermissionIfNeeded()
 
-        // 启动 ForegroundService 来管理 Python 引擎
-        startQuantService()
+            // 启动 ForegroundService 来管理 Python 引擎
+            startQuantService()
 
-        // 检查电池优化白名单
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                // Show a dialog suggesting user add to whitelist
-                // For now, just log a warning
-                android.util.Log.w("MainActivity", "App not in battery optimization whitelist")
+            // 调度定时数据采集任务（延迟到 Activity 启动后）
+            try {
+                com.cryptoquant.app.worker.DataCollectionWorker.schedule(this)
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "WorkManager schedule failed", e)
             }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "onCreate failed", e)
+            // 确保用户看到错误信息而非闪退
+            setContentView(R.layout.activity_main)
+            val tv = findViewById<android.widget.TextView>(R.id.statusText)
+            tv?.text = "启动失败: ${e.message}"
         }
     }
 
