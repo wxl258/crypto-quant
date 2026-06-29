@@ -14,6 +14,25 @@ from typing import Dict, List
 import numpy as np
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_MIN_DATA_LENGTH = 15
+_SIGNAL_QUALITY_THRESHOLD = 0.75
+_PARTIAL_TP_TARGET_RATIO_LONG = 1.02
+_PARTIAL_TP_TARGET_RATIO_SHORT = 0.98
+_DIVERGENCE_PRICE_TOLERANCE_HIGH = 1.001
+_DIVERGENCE_PRICE_TOLERANCE_LOW = 0.999
+_DEFAULT_RSI_PERIOD = 14
+_DEFAULT_ATR_PERIOD = 14
+_DEFAULT_ADX_PERIOD = 14
+_DEFAULT_OVERSOLD = 30
+_DEFAULT_OVERBOUGHT = 70
+_DEFAULT_EXIT_MID = 50
+_DEFAULT_PARTIAL_TP_RATIO = 0.5
+_DEFAULT_ATR_SL_MULT = 1.5
+_DEFAULT_ATR_TP_MULT = 2.0
+_DEFAULT_ATR_SL_MULT_ENTRY = 1.0
+_DEFAULT_ADX_THRESHOLD = 25
+
 
 class RSIMeanReversionStrategy(Strategy):
     """RSI Mean Reversion with EMA200 trend filter, divergence detection, partial take-profit,
@@ -46,8 +65,12 @@ class RSIMeanReversionStrategy(Strategy):
             'adx_trend_threshold': 30,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._partial_tp_triggered: bool = False
         self._tp_price: float = float('inf')
         self._sl_price: float = 0.0
@@ -71,19 +94,19 @@ class RSIMeanReversionStrategy(Strategy):
             {"name": "use_partial_tp", "type": "bool", "default": False, "label": "启用部分止盈"},
             {"name": "use_atr_exit", "type": "bool", "default": True, "label": "启用ATR止盈止损"},
             {"name": "atr_period", "type": "int", "default": 14, "min": 5, "max": 50, "label": "ATR周期"},
-            {"name": "atr_tp_mult", "type": "float", "default": 3.0, "min": 1.0, "max": 5.0, "step": 0.5, "label": "ATR止盈倍数"},
-            {"name": "atr_sl_mult", "type": "float", "default": 1.5, "min": 0.5, "max": 3.0, "step": 0.5, "label": "ATR止损倍数"},
+            {"name": "atr_tp_mult", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5, "label": "ATR止盈倍数"},
+            {"name": "atr_sl_mult", "type": "float", "default": 1.0, "min": 0.5, "max": 3.0, "step": 0.5, "label": "ATR止损倍数"},
         ]
 
     def init(self):
         close = self.data['close'].values
-        if len(close) < 15:
+        if len(close) < _MIN_DATA_LENGTH:
             self.add_indicator('rsi', np.full(len(close), np.nan))
             self.add_indicator('ema_trend', np.full(len(close), np.nan))
             self.add_indicator('atr', np.full(len(close), np.nan))
             return
 
-        period = self.get_param('rsi_period', 14)
+        period = self.get_param('rsi_period', _DEFAULT_RSI_PERIOD)
         ema_period = min(self.get_param('ema_trend_period', 200), len(close))
         ema_period = max(ema_period, 2)
 
@@ -94,7 +117,7 @@ class RSIMeanReversionStrategy(Strategy):
         if self.get_param('use_atr_exit', True):
             high = self.data['high'].values
             low = self.data['low'].values
-            atr_period = self.get_param('atr_period', 14)
+            atr_period = self.get_param('atr_period', _DEFAULT_ATR_PERIOD)
             self.add_indicator('atr', self.atr(high, low, close, atr_period))
         else:
             self.add_indicator('atr', np.full(len(close), np.nan))
@@ -134,11 +157,11 @@ class RSIMeanReversionStrategy(Strategy):
         second_half_low = np.nanmin(close[mid:i+1])
         second_half_rsi_low = np.nanmin(rsi_second)
 
-        if (second_half_high > first_half_high * 1.001 and
+        if (second_half_high > first_half_high * _DIVERGENCE_PRICE_TOLERANCE_HIGH and
             second_half_rsi_high < first_half_rsi_high):
             return 'bearish'
 
-        if (second_half_low < first_half_low * 0.999 and
+        if (second_half_low < first_half_low * _DIVERGENCE_PRICE_TOLERANCE_LOW and
             second_half_rsi_low > first_half_rsi_low):
             return 'bullish'
 
@@ -163,7 +186,7 @@ class RSIMeanReversionStrategy(Strategy):
                 self._highest_since_entry = price
                 current_atr = atr[i]
                 # Only update stop-loss; take-profit stays fixed at entry
-                self._sl_price = self._highest_since_entry - current_atr * self.get_param('atr_sl_mult', 1.5)
+                self._sl_price = self._highest_since_entry - current_atr * self.get_param('atr_sl_mult', _DEFAULT_ATR_SL_MULT)
 
             if price >= self._tp_price:
                 self._entry_price = 0.0
@@ -186,7 +209,7 @@ class RSIMeanReversionStrategy(Strategy):
                 self._highest_since_entry = price
                 current_atr = atr[i]
                 # Only update stop-loss; take-profit stays fixed at entry
-                self._sl_price = self._highest_since_entry + current_atr * self.get_param('atr_sl_mult', 1.5)
+                self._sl_price = self._highest_since_entry + current_atr * self.get_param('atr_sl_mult', _DEFAULT_ATR_SL_MULT)
 
             if price <= self._tp_price:
                 self._entry_price = 0.0
@@ -207,13 +230,13 @@ class RSIMeanReversionStrategy(Strategy):
             return Signal(SignalType.HOLD, "", self.data['close'].iloc[i])
 
         price = self.data['close'].iloc[i]
-        oversold = self.get_param('oversold', 30)
-        overbought = self.get_param('overbought', 70)
-        exit_mid = self.get_param('exit_mid', 50)
+        oversold = self.get_param('oversold', _DEFAULT_OVERSOLD)
+        overbought = self.get_param('overbought', _DEFAULT_OVERBOUGHT)
+        exit_mid = self.get_param('exit_mid', _DEFAULT_EXIT_MID)
         use_mid = self.get_param('use_mid_exit', True)
         use_trend = self.get_param('use_trend_filter', True)
         use_partial = self.get_param('use_partial_tp', True)
-        partial_ratio = self.get_param('partial_tp_ratio', 0.5)
+        partial_ratio = self.get_param('partial_tp_ratio', _DEFAULT_PARTIAL_TP_RATIO)
         use_atr = self.get_param('use_atr_exit', True)
         pos = self.get_position()
 
@@ -221,7 +244,7 @@ class RSIMeanReversionStrategy(Strategy):
         if self.get_param('use_adx_trend_filter', True) and pos == 0:
             if self.is_trending_adx(
                 self.data['high'].values, self.data['low'].values, self.data['close'].values,
-                i, period=14, threshold=self.get_param('adx_trend_threshold', 25)
+                i, period=_DEFAULT_ADX_PERIOD, threshold=self.get_param('adx_trend_threshold', _DEFAULT_ADX_THRESHOLD)
             ):
                 return Signal(SignalType.HOLD, "", price, reason="ADX趋势过滤:暂停均值回归")
 
@@ -239,7 +262,7 @@ class RSIMeanReversionStrategy(Strategy):
 
         # --- Exit logic for partial take-profit ---
         if pos == 1 and use_partial and not self._partial_tp_triggered and self._entry_price > 0:
-            tp_target = self._entry_price * 1.02
+            tp_target = self._entry_price * _PARTIAL_TP_TARGET_RATIO_LONG
             tp_level = self._entry_price + (tp_target - self._entry_price) * partial_ratio
             if price >= tp_level:
                 self._partial_tp_triggered = True
@@ -247,7 +270,7 @@ class RSIMeanReversionStrategy(Strategy):
                               reason=f"部分止盈({partial_ratio*100:.0f}%)触发 @ {price:.2f}")
 
         elif pos == -1 and use_partial and not self._partial_tp_triggered and self._entry_price > 0:
-            tp_target = self._entry_price * 0.98
+            tp_target = self._entry_price * _PARTIAL_TP_TARGET_RATIO_SHORT
             tp_level = self._entry_price - (self._entry_price - tp_target) * partial_ratio
             if price <= tp_level:
                 self._partial_tp_triggered = True
@@ -264,7 +287,7 @@ class RSIMeanReversionStrategy(Strategy):
                     return Signal(SignalType.HOLD, "", price)
 
                 # Signal quality filter: only enter on high-quality signals
-                if self.signal_quality_score(i, 'BUY') < 0.75:
+                if self.signal_quality_score(i, 'BUY') < _SIGNAL_QUALITY_THRESHOLD:
                     return Signal(SignalType.HOLD, "", price, reason="信号质量不足")
 
                 self._entry_price = price
@@ -276,8 +299,8 @@ class RSIMeanReversionStrategy(Strategy):
                     atr = self._indicators.get('atr')
                     if atr is not None and not np.isnan(atr[i]):
                         current_atr = atr[i]
-                        self._tp_price = price + current_atr * self.get_param('atr_tp_mult', 2.0)
-                        self._sl_price = price - current_atr * self.get_param('atr_sl_mult', 1.0)
+                        self._tp_price = price + current_atr * self.get_param('atr_tp_mult', _DEFAULT_ATR_TP_MULT)
+                        self._sl_price = price - current_atr * self.get_param('atr_sl_mult', _DEFAULT_ATR_SL_MULT_ENTRY)
 
                 reason = f"RSI超卖({rsi[i]:.1f})，做多"
                 if divergence == 'bullish':
@@ -292,7 +315,7 @@ class RSIMeanReversionStrategy(Strategy):
                     return Signal(SignalType.HOLD, "", price)
 
                 # Signal quality filter
-                if self.signal_quality_score(i, 'SELL') < 0.75:
+                if self.signal_quality_score(i, 'SELL') < _SIGNAL_QUALITY_THRESHOLD:
                     return Signal(SignalType.HOLD, "", price, reason="信号质量不足")
 
                 self._entry_price = price
@@ -304,8 +327,8 @@ class RSIMeanReversionStrategy(Strategy):
                     atr = self._indicators.get('atr')
                     if atr is not None and not np.isnan(atr[i]):
                         current_atr = atr[i]
-                        self._tp_price = price - current_atr * self.get_param('atr_tp_mult', 2.0)
-                        self._sl_price = price + current_atr * self.get_param('atr_sl_mult', 1.0)
+                        self._tp_price = price - current_atr * self.get_param('atr_tp_mult', _DEFAULT_ATR_TP_MULT)
+                        self._sl_price = price + current_atr * self.get_param('atr_sl_mult', _DEFAULT_ATR_SL_MULT_ENTRY)
 
                 reason = f"RSI超买({rsi[i]:.1f})，做空"
                 if divergence == 'bearish':

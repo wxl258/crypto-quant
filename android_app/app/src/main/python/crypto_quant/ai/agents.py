@@ -26,6 +26,34 @@ class TechnicalAgent:
         self.macd_signal = macd_signal
         self.adx_period = adx_period
         self.volume_period = volume_period
+        self._cached_data_id = None
+        self._cached_indicators = {}
+
+    def _compute_all_indicators(self, df: pd.DataFrame) -> Dict[str, np.ndarray]:
+        """Precompute all indicators once and cache the results."""
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
+        volume = df['volume'].values if 'volume' in df.columns else None
+
+        indicators = {}
+        indicators['rsi'] = self._compute_rsi(close, self.rsi_period)
+        macd_line, macd_signal_line, macd_hist = self._compute_macd(close)
+        indicators['macd_line'] = macd_line
+        indicators['macd_signal_line'] = macd_signal_line
+        indicators['macd_hist'] = macd_hist
+        bb_mid, bb_upper, bb_lower = self._compute_bb(close)
+        indicators['bb_lower'] = bb_lower
+        indicators['bb_upper'] = bb_upper
+        adx, di_plus, di_minus = self._compute_adx(high, low, close)
+        indicators['adx'] = adx
+        indicators['di_plus'] = di_plus
+        indicators['di_minus'] = di_minus
+        if volume is not None:
+            indicators['volume_ratio'] = self._compute_volume_ratio(volume)
+        else:
+            indicators['volume_ratio'] = np.full(len(close), np.nan, dtype=float)
+        return indicators
 
     def analyze(self, df: pd.DataFrame, i: int) -> Dict[str, Any]:
         """Analyze the market at bar index i and return a technical signal.
@@ -33,17 +61,20 @@ class TechnicalAgent:
         Returns:
             dict with keys: signal, confidence, reason, indicators
         """
+        data_id = id(df)
+        if data_id != self._cached_data_id:
+            self._cached_indicators = self._compute_all_indicators(df)
+            self._cached_data_id = data_id
+
+        cached = self._cached_indicators
         close = df['close'].values
-        high = df['high'].values
-        low = df['low'].values
         volume = df['volume'].values if 'volume' in df.columns else None
 
         indicators = {}
         score = 0
 
         # 1. RSI
-        rsi = self._compute_rsi(close, self.rsi_period)
-        rsi_val = rsi[i]
+        rsi_val = cached['rsi'][i]
         indicators['rsi'] = round(float(rsi_val), 2) if not np.isnan(rsi_val) else None
 
         if not np.isnan(rsi_val):
@@ -53,27 +84,25 @@ class TechnicalAgent:
                 score -= 1  # overbought — bearish
 
         # 2. MACD
-        macd_line, macd_signal_line, macd_hist = self._compute_macd(close)
-        macd_hist_val = macd_hist[i]
+        macd_hist_val = cached['macd_hist'][i]
         indicators['macd_histogram'] = round(float(macd_hist_val), 6) if not np.isnan(macd_hist_val) else None
 
         if not np.isnan(macd_hist_val):
             if macd_hist_val > 0:
-                score += 0  # MACD bullish — adds to momentum but not a standalone trigger
+                score += 0.3  # MACD bullish — positive histogram
             else:
-                score += 0  # tracked but scored via histogram direction below
+                score -= 0.2  # MACD bearish — negative histogram
 
-        # Check MACD histogram turning positive (momentum shift)
-        if i >= 1 and not np.isnan(macd_hist[i]) and not np.isnan(macd_hist[i - 1]):
-            if macd_hist[i] > macd_hist[i - 1]:
-                score += 0  # improving momentum
-            elif macd_hist[i] < macd_hist[i - 1]:
-                score += 0
+        # Check MACD histogram momentum shift
+        if i >= 1 and not np.isnan(cached['macd_hist'][i]) and not np.isnan(cached['macd_hist'][i - 1]):
+            if cached['macd_hist'][i] > cached['macd_hist'][i - 1]:
+                score += 0.3  # improving momentum
+            elif cached['macd_hist'][i] < cached['macd_hist'][i - 1]:
+                score -= 0.2  # deteriorating momentum
 
         # 3. Bollinger Bands position
-        bb_mid, bb_upper, bb_lower = self._compute_bb(close)
-        bb_lower_val = bb_lower[i]
-        bb_upper_val = bb_upper[i]
+        bb_lower_val = cached['bb_lower'][i]
+        bb_upper_val = cached['bb_upper'][i]
         indicators['bb_lower'] = round(float(bb_lower_val), 4) if not np.isnan(bb_lower_val) else None
         indicators['bb_upper'] = round(float(bb_upper_val), 4) if not np.isnan(bb_upper_val) else None
 
@@ -84,8 +113,7 @@ class TechnicalAgent:
             score -= 1  # near/above upper band — bearish reversal signal
 
         # 4. ADX (trend strength)
-        adx, di_plus, di_minus = self._compute_adx(high, low, close)
-        adx_val = adx[i]
+        adx_val = cached['adx'][i]
         indicators['adx'] = round(float(adx_val), 2) if not np.isnan(adx_val) else None
 
         if not np.isnan(adx_val) and adx_val > 25:
@@ -93,8 +121,7 @@ class TechnicalAgent:
 
         # 5. Volume ratio
         if volume is not None:
-            vol_ratio = self._compute_volume_ratio(volume)
-            vol_ratio_val = vol_ratio[i]
+            vol_ratio_val = cached['volume_ratio'][i]
             indicators['volume_ratio'] = round(float(vol_ratio_val), 2) if not np.isnan(vol_ratio_val) else None
 
             if not np.isnan(vol_ratio_val) and vol_ratio_val > 1.5:

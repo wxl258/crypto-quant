@@ -70,8 +70,13 @@ class WorkflowOrchestrator:
         return state
 
     def _stage_technical(self, state: WorkflowState) -> WorkflowState:
-        """Stage 2: Technical analysis (handled by TechnicalAgent externally)."""
-        # This stage is filled by the strategy calling TechnicalAgent.analyze()
+        """Stage 2: Technical analysis.
+
+        NOTE: This stage is a placeholder — the actual technical analysis is
+        performed externally by multi_agent_strategy.py's next() method, which
+        calls TechnicalAgent.analyze() and populates state.technical before
+        invoking the orchestrator.
+        """
         return state
 
     def _stage_risk(self, state: WorkflowState) -> WorkflowState:
@@ -81,7 +86,13 @@ class WorkflowOrchestrator:
         return state
 
     def _stage_decision(self, state: WorkflowState) -> WorkflowState:
-        """Stage 4: Final decision — already computed by DecisionAgent."""
+        """Stage 4: Final decision.
+
+        NOTE: This stage is a placeholder — the actual decision-making is
+        performed externally by multi_agent_strategy.py's next() method, which
+        calls DecisionAgent.decide() and populates state.decision before
+        invoking the orchestrator.
+        """
         return state
 
     def _stage_review(self, state: WorkflowState) -> WorkflowState:

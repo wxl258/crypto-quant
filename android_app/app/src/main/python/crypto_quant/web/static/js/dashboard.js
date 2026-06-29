@@ -48,14 +48,18 @@ async function loadAccount() {
         if (!tbody) return;
 
         if (!data.positions || data.positions.length === 0) {
-            tbody.textContent = '';
-            const emptyRow = document.createElement('tr');
-            emptyRow.className = 'empty-row';
-            const emptyTd = document.createElement('td');
-            emptyTd.colSpan = 8;
-            emptyTd.textContent = '暂无持仓';
-            emptyRow.appendChild(emptyTd);
-            tbody.appendChild(emptyRow);
+            if (typeof renderEmptyPositions === 'function') {
+                renderEmptyPositions();
+            } else {
+                tbody.textContent = '';
+                const emptyRow = document.createElement('tr');
+                emptyRow.className = 'empty-row';
+                const emptyTd = document.createElement('td');
+                emptyTd.colSpan = 8;
+                emptyTd.textContent = '暂无持仓';
+                emptyRow.appendChild(emptyTd);
+                tbody.appendChild(emptyRow);
+            }
             return;
         }
 
@@ -379,19 +383,28 @@ function buildEquityCurve(account, trades) {
     return points;
 }
 
-// Interval buttons
-document.querySelectorAll('.chart-controls .btn-sm').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.chart-controls .btn-sm').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+// ── Deferred initialization for non-viewport charts ──
+function initCharts() {
+    // Interval buttons
+    document.querySelectorAll('.chart-controls .btn-sm').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.chart-controls .btn-sm').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadKlineChart();
+        });
+    });
+
+    // Symbol selector
+    document.getElementById('dashboard-symbol')?.addEventListener('change', () => {
         loadKlineChart();
     });
-});
+}
 
-// Symbol selector
-document.getElementById('dashboard-symbol')?.addEventListener('change', () => {
-    loadKlineChart();
-});
+if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => initCharts());
+} else {
+    setTimeout(initCharts, 200);
+}
 
 // ── PnL Calendar ──
 let _calendarYear = new Date().getFullYear();

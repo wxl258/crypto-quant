@@ -65,6 +65,7 @@ class MarketDataCollector:
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
+            df = self._validate_ohlcv(df)
             return df
             
         except Exception as e:
@@ -110,11 +111,71 @@ class MarketDataCollector:
         result = pd.concat(all_dfs)
         result = result[~result.index.duplicated(keep='first')]
         result.sort_index(inplace=True)
-        
+
+        # Quality validation after dedup
+        result = self._validate_ohlcv(result)
+
         # Store
         self.store.save_ohlcv(symbol, interval, result)
         return result
-    
+
+    def _validate_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate OHLCV data quality and replace anomalous values with NaN.
+
+        Checks performed:
+        - OHLC logic: high >= max(open, close), low <= min(open, close)
+        - Price spike detection: adjacent bar change > 30% flagged as anomaly
+        - Volume check: volume <= 0 flagged as anomaly
+        - Anomalous values are replaced with NaN and logged as warnings.
+
+        Args:
+            df: OHLCV DataFrame with columns [open, high, low, close, volume].
+
+        Returns:
+            Validated DataFrame with anomalous cells set to NaN.
+        """
+        if df is None or df.empty:
+            return df
+
+        anomaly_count = 0
+
+        # OHLC logic check
+        high_bad = df['high'] < df[['open', 'close']].max(axis=1)
+        low_bad = df['low'] > df[['open', 'close']].min(axis=1)
+        if high_bad.any():
+            cnt = high_bad.sum()
+            anomaly_count += cnt
+            logger.warning("OHLC logic: high < max(open,close) on %d rows", cnt)
+            df.loc[high_bad, ['high', 'low', 'open', 'close']] = None
+        if low_bad.any():
+            cnt = low_bad.sum()
+            anomaly_count += cnt
+            logger.warning("OHLC logic: low > min(open,close) on %d rows", cnt)
+            df.loc[low_bad, ['high', 'low', 'open', 'close']] = None
+
+        # Price spike detection (>30% change between adjacent bars)
+        if len(df) > 1:
+            pct_change = df['close'].pct_change().abs()
+            spike_mask = pct_change > 0.30
+            if spike_mask.any():
+                cnt = spike_mask.sum()
+                anomaly_count += cnt
+                logger.warning("Price spike >30%% on %d rows", cnt)
+                df.loc[spike_mask, ['open', 'high', 'low', 'close']] = None
+
+        # Volume check
+        vol_bad = df['volume'] <= 0
+        if vol_bad.any():
+            cnt = vol_bad.sum()
+            anomaly_count += cnt
+            logger.warning("Volume <= 0 on %d rows", cnt)
+            df.loc[vol_bad, 'volume'] = None
+
+        if anomaly_count > 0:
+            logger.info("_validate_ohlcv: %d anomalous values replaced with NaN", anomaly_count)
+
+        return df
+
     def get_ticker(self, symbol: str) -> Optional[Dict]:
         """Get current ticker info"""
         try:
@@ -128,7 +189,7 @@ class MarketDataCollector:
         ticker = self.get_ticker(symbol)
         return ticker['last'] if ticker else None
     
-    async def fetch_multiple_symbols(self, symbols: List[str], interval: str,
+    async def fetch_multiple_symbols(self, symbols: list[str], interval: str,
                                      limit: int = 500):
         """Fetch data for multiple symbols concurrently"""
         tasks = []
@@ -138,3 +199,36 @@ class MarketDataCollector:
             ))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return results
+
+
+# ── WorkManager 入口 ──
+
+def collect_recent_data():
+    """
+    供 Android WorkManager 调用的同步入口。
+    采集默认交易对的最近数据到本地数据库。
+    """
+    import logging
+    logger = logging.getLogger("crypto_quant.data.collector")
+
+    try:
+        from crypto_quant.config import get_config
+        config = get_config()
+        symbols = config.get("symbols", ["BTC/USDT", "ETH/USDT"])
+        exchange = config.get("exchange", "binance")
+        testnet = config.get("mode", "paper") == "paper"
+    except Exception:
+        symbols = ["BTC/USDT", "ETH/USDT"]
+        exchange = "binance"
+        testnet = True
+
+    store = DataStore()
+    collector = MarketDataCollector(store, testnet=testnet, exchange_id=exchange)
+
+    for symbol in symbols:
+        try:
+            df = collector.fetch_and_store(symbol, "15m", limit=200)
+            if df is not None:
+                logger.info(f"WorkManager 采集: {symbol} 15m × {len(df)} 条")
+        except Exception as e:
+            logger.warning(f"采集 {symbol} 失败: {e}")

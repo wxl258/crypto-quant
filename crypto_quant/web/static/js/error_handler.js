@@ -8,9 +8,15 @@ const ERROR_MESSAGES = {
     // 交易所错误
     'AuthenticationError': '🔑 API Key 验证失败，请检查 Key 是否正确',
     'Invalid API-key': '🔑 API Key 格式不正确，请重新填写',
+    'Invalid API-Key': '🔑 API Key 格式不正确，请重新填写',
+    'Invalid passphrase': '🔐 OKX API 密码 (Passphrase) 不正确，请重新填写',
     'Account has insufficient balance': '💰 账户余额不足，无法开仓',
     'Rate limit exceeded': '🐢 请求太频繁，请等待30秒后重试',
     'Exchange not available': '⏳ 交易所暂时不可用，请稍后重试',
+
+    // OKX 特有错误
+    'Okx request failed': '🔐 OKX 请求失败，请检查 API Key/Secret/密码 是否正确',
+    'Sign failed': '🔐 签名验证失败，请检查 API Secret 和密码是否正确',
 
     // 交易错误
     'Position does not exist': '📋 没有找到该持仓，可能已经平仓',

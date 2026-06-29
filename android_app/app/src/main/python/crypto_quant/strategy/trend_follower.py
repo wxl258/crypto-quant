@@ -17,6 +17,10 @@ import numpy as np
 import pandas as pd
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_ADX_DI_SCALE = 100.0
+_HIGH_VOL_THRESHOLD = 0.03
+
 
 class TrendFollowerStrategy(Strategy):
     """Pure trend-following strategy with momentum confirmation, ADX filter,
@@ -56,7 +60,7 @@ class TrendFollowerStrategy(Strategy):
             {"name": "roc_threshold", "type": "float", "default": 0.02, "min": 0.005, "max": 0.10, "step": 0.005, "label": "ROC阈值"},
             {"name": "adx_period", "type": "int", "default": 14, "min": 5, "max": 50, "label": "ADX周期"},
             {"name": "adx_threshold", "type": "int", "default": 25, "min": 15, "max": 50, "label": "ADX阈值"},
-            {"name": "atr_mult", "type": "float", "default": 2.0, "min": 1.0, "max": 5.0, "step": 0.5, "label": "ATR止损倍数"},
+            {"name": "atr_mult", "type": "float", "default": 1.5, "min": 1.0, "max": 5.0, "step": 0.5, "label": "ATR止损倍数"},
             {"name": "vol_scale", "type": "bool", "default": True, "label": "波动率调整仓位"},
             {"name": "sma_trend_period", "type": "int", "default": 4, "min": 2, "max": 20, "label": "趋势SMA周期"},
         ]
@@ -105,15 +109,15 @@ class TrendFollowerStrategy(Strategy):
 
         for j in range(period, n):
             if tr_smooth[j] > 0:
-                di_plus[j] = 100.0 * dm_plus_smooth[j] / tr_smooth[j]
-                di_minus[j] = 100.0 * dm_minus_smooth[j] / tr_smooth[j]
+                di_plus[j] = _ADX_DI_SCALE * dm_plus_smooth[j] / tr_smooth[j]
+                di_minus[j] = _ADX_DI_SCALE * dm_minus_smooth[j] / tr_smooth[j]
 
         # ADX is smoothed DX
         dx = np.full(n, np.nan, dtype=float)
         for j in range(period, n):
             denom = di_plus[j] + di_minus[j]
             if denom > 0:
-                dx[j] = 100.0 * abs(di_plus[j] - di_minus[j]) / denom
+                dx[j] = _ADX_DI_SCALE * abs(di_plus[j] - di_minus[j]) / denom
 
         adx[2 * period] = np.nanmean(dx[period + 1:2 * period + 1])
         for j in range(2 * period + 1, n):
@@ -224,8 +228,8 @@ class TrendFollowerStrategy(Strategy):
         # --- Position sizing factor (volatility-adjusted) ---
         vol_factor = 1.0
         if self.get_param('vol_scale', True) and not np.isnan(vol_ratio[i]):
-            if vol_ratio[i] > 0.03:  # High vol: reduce size
-                vol_factor = 0.03 / vol_ratio[i]
+            if vol_ratio[i] > _HIGH_VOL_THRESHOLD:  # High vol: reduce size
+                vol_factor = _HIGH_VOL_THRESHOLD / vol_ratio[i]
             # Normal vol: factor stays 1.0
 
         # --- EXIT: trailing stop with locked ATR from entry ---

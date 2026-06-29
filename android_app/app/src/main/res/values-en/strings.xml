@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">CryptoQuant</string>
+    <string name="loading_title">CryptoQuant Starting</string>
+    <string name="loading_message">Initializing quantitative trading engine...</string>
+    <string name="foreground_service_channel">CryptoQuant Service</string>
+    <string name="foreground_service_title">Quant Engine Running</string>
+    <string name="foreground_service_text">Python quantitative trading system running in background</string>
+</resources>

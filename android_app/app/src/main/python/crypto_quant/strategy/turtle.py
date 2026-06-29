@@ -20,6 +20,10 @@ import numpy as np
 import pandas as pd
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_TAKE_PROFIT_ATR_MULTIPLIER = 3
+_VOLUME_MA_WINDOW = 20
+
 
 class TurtleStrategy(Strategy):
     """Turtle Trading — Dual Donchian channel breakout with volume filter and
@@ -77,7 +81,7 @@ class TurtleStrategy(Strategy):
 
         # Volume average (for volume filter)
         if self.get_param('use_volume_filter', True) and 'volume' in self.data.columns:
-            vol_avg = pd.Series(self.data['volume'].values).rolling(window=20, min_periods=20).mean().values
+            vol_avg = pd.Series(self.data['volume'].values).rolling(window=_VOLUME_MA_WINDOW, min_periods=_VOLUME_MA_WINDOW).mean().values
         else:
             vol_avg = np.full(len(close), np.nan)
 
@@ -169,7 +173,7 @@ class TurtleStrategy(Strategy):
                 self._highest_since_entry = high_i
                 self._lowest_since_entry = low_i
                 sl = price - atr[i] * atr_stop
-                tp = price + atr[i] * atr_stop * 3
+                tp = price + atr[i] * atr_stop * _TAKE_PROFIT_ATR_MULTIPLIER
                 entry_type = "主突破" if long_primary else "趋势延续"
                 return Signal(SignalType.BUY, "", price, stop_loss=sl, take_profit=tp,
                             reason=f"海龟{entry_type}入场(上轨={entry_high[i]:.1f})")
@@ -180,7 +184,7 @@ class TurtleStrategy(Strategy):
                 self._highest_since_entry = high_i
                 self._lowest_since_entry = low_i
                 sl = price + atr[i] * atr_stop
-                tp = price - atr[i] * atr_stop * 3
+                tp = price - atr[i] * atr_stop * _TAKE_PROFIT_ATR_MULTIPLIER
                 entry_type = "主突破" if short_primary else "趋势延续"
                 return Signal(SignalType.SELL, "", price, stop_loss=sl, take_profit=tp,
                             reason=f"海龟{entry_type}入场(下轨={entry_low[i]:.1f})")

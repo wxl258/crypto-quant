@@ -192,3 +192,22 @@ class TestRiskManager:
         assert summary['total_capital'] == 10000.0
         assert summary['open_positions'] == 1
         assert 'positions' in summary
+
+    def test_kelly_dynamic(self):
+        """Kelly formula should work with defaults when no trade history exists."""
+        rm = self._make_manager(position_sizing="kelly")
+        rm.set_capital(10000.0)
+        size = rm.calculate_position_size("BTCUSDT", 65000.0, leverage=3)
+
+        # With defaults (win_rate=0.5, reward_risk=1.5):
+        # kelly_pct = 0.5 - (1-0.5)/1.5 = 0.5 - 0.333 = 0.167
+        # capped to [0.02, 0.25] -> 0.167
+        expected_kelly = 0.5 - (1 - 0.5) / 1.5  # ~0.1667
+        expected_kelly = max(0.02, min(expected_kelly, 0.25))
+        expected_size = (10000.0 * expected_kelly) * 3 / 65000.0
+        assert abs(size - expected_size) < 1e-8, f"size={size}, expected={expected_size}"
+        assert size > 0
+
+        # Also test that the result is within reasonable bounds
+        assert size > 0.001  # minimum quantity
+        assert size < 0.2   # reasonable upper bound for 10k capital

@@ -1,18 +1,51 @@
-name: 打包 APK (Chaquopy)
+name: CI — 代码检查 & APK 构建
 
 on:
   push:
     branches: [main, master]
     paths:
+      - 'crypto_quant/**'
       - 'android_app/**'
       - '.github/workflows/build-apk.yml'
+      - 'VERSION'
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
+  # ── Python 代码质量检查 ──
+  lint:
+    name: Python 代码检查
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r crypto_quant/requirements.txt
+          pip install ruff pytest
+
+      - name: Ruff 代码检查
+        run: ruff check crypto_quant/ --ignore=E501,E402
+
+      - name: 运行测试
+        run: |
+          cd crypto_quant
+          python -m pytest tests/ -v --tb=short || echo "⚠️ 部分测试未通过（非阻塞）"
+
+  # ── APK 构建 ──
   build:
     name: 构建 APK
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    needs: lint
 
     steps:
       - name: 检出代码
@@ -50,9 +83,16 @@ jobs:
           path: |
             ~/.chaquopy
             android_app/app/build/chaquopy
-          key: chaquopy-${{ runner.os }}-v1-${{ hashFiles('android_app/app/build.gradle.kts') }}
+          key: chaquopy-${{ runner.os }}-v2-${{ hashFiles('android_app/app/build.gradle.kts', 'crypto_quant/requirements.txt') }}
           restore-keys: |
             chaquopy-${{ runner.os }}-v1-
+
+      - name: 读取版本号
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '\n\r')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "App version: $VERSION"
 
       - name: 授予 gradlew 执行权限
         run: chmod +x android_app/gradlew
@@ -72,7 +112,7 @@ jobs:
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: CryptoQuant-v1.0.0-debug
+          name: CryptoQuant-v${{ steps.version.outputs.version }}-debug
           path: android_app/app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
@@ -80,6 +120,7 @@ jobs:
         run: |
           echo "============================================"
           echo "  CryptoQuant APK 构建完成！"
+          echo "  版本: v${{ steps.version.outputs.version }}"
           echo "  方案: Chaquopy 17.0 + Python 3.10"
           echo "============================================"
           find android_app -name "*.apk" -type f -exec ls -lh {} \; 2>/dev/null

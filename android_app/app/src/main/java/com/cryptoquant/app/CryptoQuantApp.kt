@@ -1,10 +1,13 @@
 package com.cryptoquant.app
 
 import com.chaquo.python.android.PyApplication
+import com.cryptoquant.app.worker.DataCollectionWorker
 
 class CryptoQuantApp : PyApplication() {
     override fun onCreate() {
         super.onCreate()
-        // Python will be auto-started on first use via Chaquopy
+
+        // 调度定时数据采集任务（每 15 分钟）
+        DataCollectionWorker.schedule(this)
     }
 }

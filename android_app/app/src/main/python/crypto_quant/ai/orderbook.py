@@ -37,34 +37,52 @@ class OrderBookAnalyzer:
         self.base_url = "https://api.binance.com/api/v3/depth"
         self.book: Dict = {'bids': [], 'asks': []}
         self._last_update_id: int = 0
+        self._cache_time: float = 0.0
+        self._cache_ttl: float = 1.0  # 1 second TTL for order book cache
 
-    def fetch(self) -> Optional[Dict]:
-        """Fetch current order book from Binance public API.
+    def fetch(self, force: bool = False) -> Optional[Dict]:
+        """Fetch current order book from exchange public API.
+
+        Results are cached for ``_cache_ttl`` seconds to avoid rate limiting.
+
+        Args:
+            force: If True, bypass cache and fetch fresh data.
 
         Returns:
             dict with 'bids' and 'asks' keys, each a list of [price, qty] strings,
             or None if the request fails.
         """
-        try:
-            params = {
-                'symbol': self.symbol,
-                'limit': self.depth,
-            }
-            response = requests.get(self.base_url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
+        import time
+        now = time.time()
+        if not force and (now - self._cache_time) < self._cache_ttl and self.book.get('bids'):
+            return self.book
 
-            if 'bids' in data and 'asks' in data:
-                self.book = data
-                self._last_update_id = data.get('lastUpdateId', 0)
-                return self.book
-            else:
-                return None
+        for attempt in range(3):
+            try:
+                params = {
+                    'symbol': self.symbol,
+                    'limit': self.depth,
+                }
+                response = requests.get(self.base_url, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
 
-        except requests.exceptions.RequestException:
-            return None
-        except ValueError:
-            return None
+                if 'bids' in data and 'asks' in data:
+                    self.book = data
+                    self._last_update_id = data.get('lastUpdateId', 0)
+                    self._cache_time = now
+                    return self.book
+
+            except requests.exceptions.RequestException:
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s
+                    continue
+            except ValueError:
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+
+        return None
 
     def get_imbalance(self) -> float:
         """Calculate bid/ask volume imbalance ratio.

@@ -14,6 +14,8 @@ class PortfolioStrategy(Strategy):
       - majority: Requires N+ strategies to agree (simple majority)
       - unanimous: All strategies must agree
       - weighted: Each strategy has a weight, weighted sum determines direction
+      - inverse_volatility: Weight strategies by inverse of historical return
+        volatility (lower volatility → higher weight). Requires >= 30 bars.
     
     v2.0: Dynamic weights — sub-strategy weights auto-adjust based on recent
     trade performance. Losing strategies are down-weighted, winners up-weighted.
@@ -38,11 +40,13 @@ class PortfolioStrategy(Strategy):
         self._sub_strategies: List[Tuple[Strategy, float]] = []
         self._base_weights: List[float] = []
         self._trade_pnls: List[List[float]] = []  # per-strategy recent PnLs
+        self._volatility_weights: List[float] = []  # inverse-volatility weights
+        self._returns_history: List[List[float]] = []  # per-strategy return history
 
     @classmethod
     def get_param_info(cls) -> List[Dict]:
         return [
-            {"name": "vote_mode", "type": "str", "default": "majority", "label": "投票模式(majority/unanimous/weighted)"},
+            {"name": "vote_mode", "type": "str", "default": "majority", "label": "投票模式(majority/unanimous/weighted/inverse_volatility)"},
             {"name": "vote_threshold", "type": "float", "default": 0.5, "min": 0.3, "max": 1.0, "step": 0.1, "label": "加权阈值"},
             {"name": "require_exit_consensus", "type": "bool", "default": False, "label": "平仓需共识"},
             {"name": "use_dynamic_weights", "type": "bool", "default": True, "label": "动态权重调整"},
@@ -74,6 +78,44 @@ class PortfolioStrategy(Strategy):
         
         return self._base_weights[idx] * factor
 
+    def _compute_inverse_volatility_weights(self) -> List[float]:
+        """Compute weights based on inverse of historical return volatility.
+
+        Each sub-strategy's weight is proportional to 1 / volatility.
+        Requires at least 30 bars of history; otherwise returns uniform weights.
+        """
+        n = len(self._sub_strategies)
+        if n == 0:
+            return []
+
+        # Collect returns history
+        if not self._returns_history or all(len(h) < 30 for h in self._returns_history):
+            return [1.0 / n] * n
+
+        vols = []
+        for idx, hist in enumerate(self._returns_history):
+            if len(hist) >= 30:
+                std = np.std(hist[-30:])
+                # Avoid division by zero — cap minimum std
+                vols.append(max(std, 1e-6))
+            else:
+                vols.append(float('inf'))
+
+        # Replace inf with max finite value for strategies without enough data
+        finite_vols = [v for v in vols if v != float('inf')]
+        if not finite_vols:
+            return [1.0 / n] * n
+        max_vol = max(finite_vols)
+
+        # Inverse volatility: strategies with less volatility get higher weight
+        inv_vols = [1.0 / v if v != float('inf') else 1.0 / (max_vol * 2) for v in vols]
+        total = sum(inv_vols)
+        if total == 0:
+            return [1.0 / n] * n
+
+        self._volatility_weights = [w / total for w in inv_vols]
+        return self._volatility_weights
+
     def record_trade_result(self, idx: int, pnl: float):
         """Record a trade result for dynamic weight calculation."""
         while len(self._trade_pnls) <= idx:
@@ -100,12 +142,35 @@ class PortfolioStrategy(Strategy):
         pos = self.get_position()
         votes = {'BUY': 0.0, 'SELL': 0.0, 'HOLD': 0.0,
                  'CLOSE_LONG': 0.0, 'CLOSE_SHORT': 0.0}
+
+        mode = self._vote_mode
+
+        # Compute inverse-volatility weights if needed
+        if mode == 'inverse_volatility':
+            # Update returns history from current bar
+            if self.data is not None and i > 0 and i < len(self.data):
+                close_prev = self.data['close'].iloc[i - 1]
+                close_curr = self.data['close'].iloc[i]
+                if close_prev and close_prev > 0:
+                    ret = (close_curr - close_prev) / close_prev
+                    for idx in range(len(self._sub_strategies)):
+                        while len(self._returns_history) <= idx:
+                            self._returns_history.append([])
+                        self._returns_history[idx].append(ret)
+            iv_weights = self._compute_inverse_volatility_weights()
+            for idx in range(len(self._sub_strategies)):
+                if idx < len(iv_weights):
+                    self._base_weights[idx] = iv_weights[idx]
+
         for idx, (strat, _) in enumerate(self._sub_strategies):
-            weight = self._get_dynamic_weight(idx)
+            if mode == 'inverse_volatility':
+                weight = self._base_weights[idx] if idx < len(self._base_weights) else 1.0
+            else:
+                weight = self._get_dynamic_weight(idx)
             strat._position = pos
             signal = strat.next(i)
             st = signal.signal_type.value
-            
+
             if pos == 0:
                 if st == 'BUY':
                     votes['BUY'] += weight
@@ -148,6 +213,26 @@ class PortfolioStrategy(Strategy):
             return None, 0
 
         elif mode == 'weighted':
+            buy_ratio = votes['BUY'] / total_weight
+            sell_ratio = votes['SELL'] / total_weight
+            close_long_ratio = votes['CLOSE_LONG'] / total_weight
+            close_short_ratio = votes['CLOSE_SHORT'] / total_weight
+
+            if pos == 0:
+                if buy_ratio >= sell_ratio and buy_ratio >= threshold:
+                    return 'BUY', buy_ratio
+                if sell_ratio > buy_ratio and sell_ratio >= threshold:
+                    return 'SELL', sell_ratio
+            elif pos == 1:
+                if close_long_ratio >= threshold:
+                    return 'CLOSE_LONG', close_long_ratio
+            elif pos == -1:
+                if close_short_ratio >= threshold:
+                    return 'CLOSE_SHORT', close_short_ratio
+            return None, 0
+
+        elif mode == 'inverse_volatility':
+            # Same decision logic as weighted, but weights come from inverse volatility
             buy_ratio = votes['BUY'] / total_weight
             sell_ratio = votes['SELL'] / total_weight
             close_long_ratio = votes['CLOSE_LONG'] / total_weight

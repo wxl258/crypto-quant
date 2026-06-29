@@ -22,8 +22,12 @@ class SmartFollowerStrategy(Strategy):
     def _default_params(self):
         return {}
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._trend_follower = TrendFollowerStrategy()
         self._smart_meta = SmartMetaStrategy()
 

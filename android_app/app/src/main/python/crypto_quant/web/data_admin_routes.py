@@ -4,7 +4,10 @@
 from fastapi import APIRouter, HTTPException
 from pathlib import Path
 import sqlite3
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/data", tags=["data-admin"])
 
@@ -46,7 +49,8 @@ async def data_stats():
         cur.execute(
             "SELECT symbol, interval, COUNT(*) as cnt FROM ohlcv GROUP BY symbol, interval ORDER BY cnt DESC LIMIT 10")
         stats["top_pairs"] = [{"symbol": r[0], "interval": r[1], "count": r[2]} for r in cur.fetchall()]
-    except:
+    except Exception as e:
+        logger.warning(f"OHLCV stats query failed: {e}")
         stats["ohlcv_error"] = "表不存在或查询失败"
 
     # 交易记录统计
@@ -67,7 +71,8 @@ async def data_stats():
         wins = cur.fetchone()[0]
         if stats["closed_trades"] > 0:
             stats["win_rate"] = round(wins / stats["closed_trades"] * 100, 1)
-    except:
+    except Exception as e:
+        logger.warning(f"Trade stats query failed: {e}")
         stats["trade_error"] = "表不存在或查询失败"
 
     # 数据库大小

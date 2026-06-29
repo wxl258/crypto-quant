@@ -1,12 +1,62 @@
-.buildozer/
+# ============================================================
+# CryptoQuant .gitignore
+# ============================================================
+
+# ── Python ──
 __pycache__/
 *.pyc
-*.bak
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
 
-# Android
+# ── 虚拟环境 ──
+venv/
+.venv/
+env/
+.env
+*.env.local
+
+# ── 数据库 / 数据文件 ──
+*.db
+*.sqlite
+*.sqlite3
+
+# ── IDE / Editor ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Android ──
 android_app/.gradle/
 android_app/build/
 android_app/app/build/
 android_app/local.properties
 *.iml
-.idea/
+
+# ── Buildozer（已移除，保留以防残留） ──
+.buildozer/
+bin/
+
+# ── 临时文件 ──
+*.bak
+*.tmp
+*.log
+
+# ── macOS ──
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Jupyter ──
+.ipynb_checkpoints/

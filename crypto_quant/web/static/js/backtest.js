@@ -7,6 +7,10 @@ let btEquityChart = null;
 
 function initBacktestPage() {
     updateBacktestParams();
+    // Set enhanced empty state for backtest results
+    if (typeof renderEmptyBacktest === 'function') {
+        renderEmptyBacktest();
+    }
 }
 
 document.getElementById('bt-strategy')?.addEventListener('change', updateBacktestParams);

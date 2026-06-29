@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  crypto-quant:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/crypto_quant/data
+    environment:
+      - CQ_MODE=paper
+    restart: unless-stopped

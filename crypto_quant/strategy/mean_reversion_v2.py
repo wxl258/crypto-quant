@@ -19,6 +19,14 @@ import numpy as np
 import pandas as pd
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_VOLUME_SURGE_RATIO = 1.5
+_DIVERGENCE_PRICE_TOLERANCE_HIGH = 1.001
+_DIVERGENCE_PRICE_TOLERANCE_LOW = 0.999
+_MIN_DATA_LENGTH = 15
+_DEFAULT_ADX_PERIOD = 14
+_DEFAULT_ADX_THRESHOLD = 25
+
 
 class MeanReversionV2Strategy(Strategy):
     """Enhanced mean-reversion with divergence detection, volatility regime
@@ -47,8 +55,12 @@ class MeanReversionV2Strategy(Strategy):
             'adx_trend_threshold': 30,
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._entry_score: int = 0
 
     @classmethod
@@ -64,7 +76,7 @@ class MeanReversionV2Strategy(Strategy):
             {"name": "min_score", "type": "int", "default": 2, "min": 1, "max": 3, "label": "最低入场评分"},
             {"name": "volume_period", "type": "int", "default": 20, "min": 5, "max": 50, "label": "成交量均线周期"},
             {"name": "atr_period", "type": "int", "default": 14, "min": 5, "max": 50, "label": "ATR周期"},
-            {"name": "atr_exit_mult", "type": "float", "default": 1.5, "min": 0.5, "max": 3.0, "step": 0.5, "label": "ATR退出倍数"},
+            {"name": "atr_exit_mult", "type": "float", "default": 1.0, "min": 0.5, "max": 3.0, "step": 0.5, "label": "ATR退出倍数"},
             {"name": "use_atr_exit", "type": "bool", "default": True, "label": "ATR退出"},
             {"name": "divergence_lookback", "type": "int", "default": 20, "min": 5, "max": 50, "label": "背离回溯期"},
         ]
@@ -77,7 +89,7 @@ class MeanReversionV2Strategy(Strategy):
         if avg_vol <= 0:
             return 0
         ratio = volume[i] / avg_vol
-        if ratio > 1.5:
+        if ratio > _VOLUME_SURGE_RATIO:
             return 1
         return 0
 
@@ -135,12 +147,12 @@ class MeanReversionV2Strategy(Strategy):
         second_roc_high = np.nanmax(second_roc)
 
         # Bullish divergence: price lower low, ROC higher low
-        if (second_price_low < first_price_low * 0.999 and
+        if (second_price_low < first_price_low * _DIVERGENCE_PRICE_TOLERANCE_LOW and
             second_roc_low > first_roc_low):
             return 'bullish'
 
         # Bearish divergence: price higher high, ROC lower high
-        if (second_price_high > first_price_high * 1.001 and
+        if (second_price_high > first_price_high * _DIVERGENCE_PRICE_TOLERANCE_HIGH and
             second_roc_high < first_roc_high):
             return 'bearish'
 
@@ -153,7 +165,7 @@ class MeanReversionV2Strategy(Strategy):
         volume = self.data['volume'].values if 'volume' in self.data.columns else None
         n = len(close)
 
-        if n < 15:
+        if n < _MIN_DATA_LENGTH:
             self.add_indicator('rsi', np.full(n, np.nan))
             self.add_indicator('bb_lower', np.full(n, np.nan))
             self.add_indicator('bb_upper', np.full(n, np.nan))
@@ -282,7 +294,7 @@ class MeanReversionV2Strategy(Strategy):
         if pos == 0 and self.get_param('use_adx_trend_filter', True):
             if self.is_trending_adx(
                 self.data['high'].values, self.data['low'].values, self.data['close'].values,
-                i, period=14, threshold=self.get_param('adx_trend_threshold', 25)
+                i, period=_DEFAULT_ADX_PERIOD, threshold=self.get_param('adx_trend_threshold', _DEFAULT_ADX_THRESHOLD)
             ):
                 return Signal(SignalType.HOLD, "", price, reason="ADX趋势过滤:暂停均值回归")
         use_atr_exit = self.get_param('use_atr_exit', True)

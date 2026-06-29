@@ -88,7 +88,11 @@ function renderStrategyCards(strategies) {
     if (!grid) return;
 
     if (strategies.length === 0) {
-        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:60px 20px;font-size:15px;">🔍 没有匹配的策略</div>';
+        if (typeof renderEmptyStrategies === 'function') {
+            renderEmptyStrategies();
+        } else {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:60px 20px;font-size:15px;">🔍 没有匹配的策略</div>';
+        }
         return;
     }
 

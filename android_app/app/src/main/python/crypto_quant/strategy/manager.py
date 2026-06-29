@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
+from version import __version__
+
 logger = logging.getLogger(__name__)
 
 # 策略存储目录
@@ -25,7 +27,7 @@ class StrategyMeta:
     name: str
     file_name: str           # 策略文件名，如 my_strategy.py
     class_name: str          # 策略类名，如 MyStrategy
-    version: str = "1.0.0"
+    version: str = __version__
     author: str = ""
     description: str = ""
     enabled: bool = True
@@ -53,7 +55,8 @@ class StrategyManager:
             try:
                 with open(STRATEGY_STATE_FILE, 'r') as f:
                     return json.load(f)
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to load strategy state file: {e}")
                 pass
         return {"custom_strategies": {}, "disabled": []}
     
@@ -68,7 +71,13 @@ class StrategyManager:
         """自动发现所有可用策略（内置 + 自定义）"""
         from strategy.base import StrategyRegistry
         
-        # 内置策略已经在 __init__.py 中注册
+        # 触发所有懒加载策略
+        for name in list(StrategyRegistry._lazy_modules.keys()):
+            if name not in StrategyRegistry._strategies:
+                try:
+                    StrategyRegistry.get(name)
+                except Exception:
+                    pass
         builtin = set(StrategyRegistry._strategies.keys())
         
         # 自定义策略
@@ -184,7 +193,7 @@ class StrategyManager:
                 "source": "url",
                 "source_url": url,
                 "sha256": sha256,
-                "version": "1.0.0",
+                "version": __version__,
                 "downloaded_at": str(__import__('datetime').datetime.now()),
             }
             self._save_state()
@@ -326,9 +335,9 @@ class StrategyManager:
                 source_file = sys.modules[strategy_cls.__module__].__file__
                 if source_file:
                     return Path(source_file).read_text(encoding="utf-8")
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to read strategy source file for '{name}': {e}")
                 pass
-        
         return None
     
     def get_strategy_info(self, name: str) -> Optional[Dict]:

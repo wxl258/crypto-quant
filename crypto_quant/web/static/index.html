@@ -3,10 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#07080c">
+<meta name="description" content="加密货币量化交易系统">
+<link rel="manifest" href="/static/manifest.json">
 <title>加密货币量化交易系统</title>
-<link rel="stylesheet" href="/static/css/style.css">
-<script src="/static/js/vendor/chart.umd.min.js"></script>
-<script src="/static/js/vendor/lightweight-charts.standalone.production.js"></script>
+<style>
+/* Critical CSS - 仅首屏布局 */
+:root{--bg-primary:#07080c;--bg-secondary:#0e1016}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;background:var(--bg-primary);color:#f8fafc}
+.app{display:flex;min-height:100vh}
+.sidebar{width:260px;background:var(--bg-secondary);position:fixed;top:0;left:0;bottom:0;z-index:100}
+.main-content{flex:1;margin-left:260px;padding:32px 36px}
+</style>
+<link rel="stylesheet" href="/static/css/style.css" media="print" onload="this.media='all'">
+<script src="/static/js/vendor/chart.umd.min.js" defer></script>
+<script src="/static/js/vendor/lightweight-charts.standalone.production.js" defer></script>
 </head>
 <body>
 <script>
@@ -19,9 +31,10 @@ if (!localStorage.getItem('onboarding_done')) {
     <!-- Mobile hamburger button -->
     <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle navigation" onclick="toggleSidebar()">☰</button>
     <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
+    <aside class="sidebar" id="sidebar" role="navigation" aria-label="主导航">
         <div class="sidebar-header">
-            <h1>📊 QuantTrade</h1>
+            <div class="sidebar-logo">CQ</div>
+            <h1>CryptoQuant</h1>
             <span class="badge" id="sidebar-mode-badge">模拟盘</span>
         </div>
         <nav class="sidebar-nav">
@@ -53,6 +66,9 @@ if (!localStorage.getItem('onboarding_done')) {
             <a href="#" class="nav-item" data-page="backup">
                 <span class="nav-icon">💾</span> <span class="nav-label">备份恢复</span>
             </a>
+            <a href="#" class="nav-item" data-page="exchange">
+                <span class="nav-icon">🏦</span> <span class="nav-label">交易所设置</span>
+            </a>
             <a href="#" class="nav-item" data-page="alerts">
                 <span class="nav-icon">🔔</span> <span class="nav-label">自定义告警</span>
             </a>
@@ -64,6 +80,16 @@ if (!localStorage.getItem('onboarding_done')) {
             <div class="system-status">
                 <span class="status-dot online"></span> 系统运行中
             </div>
+            <!-- Notification & Theme row -->
+            <div class="sidebar-actions-row">
+                <button class="sidebar-action-btn" id="notification-btn" onclick="toggleNotificationCenter()" aria-label="通知中心" title="通知中心">
+                    🔔
+                    <span class="notification-badge" id="notification-badge" style="display:none">0</span>
+                </button>
+                <button class="sidebar-action-btn" id="theme-toggle-btn" onclick="toggleTheme()" aria-label="切换主题" title="切换深色/浅色模式">
+                    🌙
+                </button>
+            </div>
             <div class="mode-toggle">
                 <span class="mode-label" id="mode-display">模拟盘</span>
                 <label class="switch">
@@ -72,10 +98,20 @@ if (!localStorage.getItem('onboarding_done')) {
                 </label>
             </div>
         </div>
+        <!-- Notification Center Dropdown -->
+        <div class="notification-dropdown" id="notification-dropdown" style="display:none">
+            <div class="notification-dropdown-header">
+                <span>通知中心</span>
+                <button class="notification-clear-btn" onclick="clearNotifications()">清空</button>
+            </div>
+            <div class="notification-list" id="notification-list">
+                <div class="notification-empty">暂无通知</div>
+            </div>
+        </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="main-content">
+    <main class="main-content" role="main">
         <!-- Dashboard Page -->
         <div id="page-dashboard" class="page active">
             <div class="page-header">
@@ -92,15 +128,15 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
 
             <!-- 一键开箱区域 -->
-            <div id="quick-start-area" style="display:none;">
-                <div style="text-align:center; padding:20px; background:linear-gradient(135deg, #1a3a4a, #1a2a3a); border-radius:12px; margin-bottom:16px;">
-                    <div style="font-size:40px; margin-bottom:8px;">🚀</div>
-                    <div style="font-size:18px; font-weight:bold; color:#4fc3f7; margin-bottom:8px;">欢迎使用量化交易系统</div>
-                    <div style="color:#8b8fa8; font-size:13px; margin-bottom:16px;">一键启动，使用最优策略自动交易</div>
-                    <button id="quick-start-btn" onclick="quickStart()" style="background:linear-gradient(135deg, #4fc3f7, #2196f3); color:white; border:none; padding:14px 40px; border-radius:25px; font-size:16px; font-weight:bold; cursor:pointer;">
+            <div id="quick-start-area" class="quick-start-area">
+                <div class="quick-start-inner">
+                    <div class="quick-start-icon">🚀</div>
+                    <div class="quick-start-title">欢迎使用量化交易系统</div>
+                    <div class="quick-start-desc">一键启动，使用最优策略自动交易</div>
+                    <button id="quick-start-btn" class="quick-start-btn" onclick="quickStart()">
                         🚀 一键启动（模拟盘）
                     </button>
-                    <div style="color:#8b8fa8; font-size:11px; margin-top:8px;">使用 RSI均值回归策略 · BTCUSDT · 1小时K线 · 零风险</div>
+                    <div class="quick-start-hint">使用 RSI均值回归策略 · BTCUSDT · 1小时K线 · 零风险</div>
                 </div>
             </div>
 
@@ -126,12 +162,12 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
 
             <!-- 策略信号概览 -->
-            <div class="panel" id="signals-panel" style="display:none;">
+            <div class="panel signals-panel" id="signals-panel">
                 <div class="panel-header">
                     <h3>📡 实时信号</h3>
-                    <span style="font-size:12px;color:var(--text-muted)" id="signal-update-time"></span>
+                    <span class="signal-update-time" id="signal-update-time"></span>
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:12px; padding:16px;" id="signals-grid">
+                <div class="signals-grid" id="signals-grid">
                     <!-- JS动态填充 -->
                 </div>
             </div>
@@ -149,7 +185,7 @@ if (!localStorage.getItem('onboarding_done')) {
                             <button class="btn-sm" data-interval="4h">4时</button>
                         </div>
                     </div>
-                    <div id="kline-chart" style="height: 400px;"></div>
+                    <div id="kline-chart" class="kline-chart" style="height: 400px;"></div>
                 </div>
                 <div class="chart-container small">
                     <div class="chart-header"><h3>资金曲线</h3></div>
@@ -161,16 +197,16 @@ if (!localStorage.getItem('onboarding_done')) {
             <div class="panel" id="pnl-calendar-panel">
                 <div class="panel-header">
                     <h3>📅 盈亏日历</h3>
-                    <div style="display:flex;gap:8px;align-items:center;">
+                    <div class="calendar-nav">
                         <button class="btn-sm" onclick="changeCalendarMonth(-1)">◀</button>
-                        <span id="calendar-month-label" style="font-size:13px;color:var(--text-secondary)"></span>
+                        <span id="calendar-month-label" class="calendar-month-label"></span>
                         <button class="btn-sm" onclick="changeCalendarMonth(1)">▶</button>
                     </div>
                 </div>
-                <div style="padding:12px;" id="pnl-calendar">
+                <div class="calendar-body pnl-calendar" id="pnl-calendar">
                     <!-- JS动态生成 -->
                 </div>
-                <div style="display:flex;justify-content:center;gap:16px;padding:8px 16px 16px;font-size:11px;color:var(--text-muted);">
+                <div class="calendar-legend">
                     <span>🟢 盈利</span><span>⚪ 持平</span><span>🔴 亏损</span><span>⬜ 无交易</span>
                 </div>
             </div>
@@ -181,7 +217,7 @@ if (!localStorage.getItem('onboarding_done')) {
                     <h3>当前持仓</h3>
                 </div>
                 <div class="table-container">
-                    <table class="data-table" id="positions-table">
+                    <table class="data-table" id="positions-table" role="table" aria-label="当前持仓列表">
                         <thead>
                             <tr>
                                 <th>交易对</th><th>方向</th><th>入场价</th>
@@ -203,17 +239,17 @@ if (!localStorage.getItem('onboarding_done')) {
                 <h2>策略管理</h2>
                 <button class="btn btn-primary" onclick="showStrategyModal()">+ 新建策略实例</button>
             </div>
-            <div class="strategy-filters" style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
+            <div class="strategy-filters">
                 <input type="text" id="strategy-search" placeholder="🔍 搜索策略..."
-                       style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); color:var(--text-primary); font-size:14px;">
-                <select id="strategy-difficulty-filter" class="form-select" style="width:auto; min-width:120px;">
+                       class="strategy-search-input">
+                <select id="strategy-difficulty-filter" class="form-select strategy-filter-select">
                     <option value="all">全部难度</option>
                     <option value="⭐ 入门">⭐ 入门</option>
                     <option value="⭐⭐ 进阶">⭐⭐ 进阶</option>
                     <option value="⭐⭐⭐ 中高级">⭐⭐⭐ 中高级</option>
                     <option value="⭐⭐⭐⭐ 高级">⭐⭐⭐⭐ 高级</option>
                 </select>
-                <select id="strategy-type-filter" class="form-select" style="width:auto; min-width:120px;">
+                <select id="strategy-type-filter" class="form-select strategy-filter-select">
                     <option value="all">全部类型</option>
                     <option value="trend">趋势跟踪</option>
                     <option value="mean_reversion">均值回归</option>
@@ -224,11 +260,11 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
             <!-- 策略排行 -->
             <div class="panel" id="strategy-ranking-panel">
-                <div class="panel-header" onclick="toggleRanking()" style="cursor:pointer;">
+                <div class="panel-header ranking-header-clickable" onclick="toggleRanking()">
                     <h3>🏆 策略表现排行</h3>
                     <span id="ranking-toggle-icon">▼</span>
                 </div>
-                <div id="strategy-ranking-content" style="padding:12px;">
+                <div id="strategy-ranking-content" class="ranking-content">
                     <!-- JS动态生成排行榜 -->
                 </div>
             </div>
@@ -306,7 +342,7 @@ if (!localStorage.getItem('onboarding_done')) {
                     <button class="btn btn-primary btn-block" onclick="runBacktest()">
                         🚀 开始回测
                     </button>
-                    <button class="btn btn-block" style="background:var(--bg-hover);color:var(--text-primary);margin-top:8px" onclick="runCompareAll()">
+                    <button class="btn btn-block bt-run-compare-btn" onclick="runCompareAll()">
                         📊 全部策略对比
                     </button>
                 </div>
@@ -314,7 +350,7 @@ if (!localStorage.getItem('onboarding_done')) {
                     <div class="chart-container" style="height:350px">
                         <div class="chart-header">
                             <h3>资金曲线</h3>
-                            <span id="bt-date-info" style="font-size:12px;color:var(--text-muted);display:none"></span>
+                            <span id="bt-date-info" class="bt-date-info"></span>
                         </div>
                         <canvas id="bt-equity-chart"></canvas>
                     </div>
@@ -328,24 +364,24 @@ if (!localStorage.getItem('onboarding_done')) {
                         <div class="metric-card"><span class="metric-label">卡玛比率</span><span class="metric-value" id="m-calmar">--</span></div>
                         <div class="metric-card"><span class="metric-label">总交易</span><span class="metric-value" id="m-trades">--</span></div>
                     </div>
-                    <div class="export-buttons" id="bt-export" style="display:none;margin-bottom:16px">
+                    <div class="export-buttons bt-export-buttons" id="bt-export">
                         <button class="btn btn-sm" onclick="exportBacktestCSV()" style="margin-right:8px">导出 CSV</button>
                         <button class="btn btn-sm" onclick="exportBacktestPDF()">导出 PDF</button>
                     </div>
                     <div class="panel">
                         <div class="panel-header"><h3>交易明细</h3></div>
                         <div class="table-container">
-                            <table class="data-table" id="bt-trades-table">
+                            <table class="data-table" id="bt-trades-table" role="table" aria-label="回测交易明细">
                                 <thead><tr><th>入场时间</th><th>方向</th><th>入场价</th><th>出场价</th><th>盈亏</th><th>收益率</th></tr></thead>
                                 <tbody><tr class="empty-row"><td colspan="6">请先运行回测</td></tr></tbody>
                             </table>
                         </div>
                     </div>
                     <!-- Compare All Results -->
-                    <div class="panel" id="bt-compare-panel" style="display:none">
-                        <div class="panel-header"><h3>策略对比 <span id="bt-compare-info" style="font-size:12px;color:var(--text-muted);font-weight:normal"></span></h3></div>
+                    <div class="panel bt-compare-panel" id="bt-compare-panel">
+                        <div class="panel-header"><h3>策略对比 <span id="bt-compare-info" class="bt-compare-info"></span></h3></div>
                         <div class="table-container">
-                            <table class="data-table" id="bt-compare-table">
+                            <table class="data-table" id="bt-compare-table" role="table" aria-label="策略对比结果">
                                 <thead><tr><th>策略</th><th>交易</th><th>胜率</th><th>收益率</th><th>夏普</th><th>最大回撤</th><th>盈亏比</th></tr></thead>
                                 <tbody><tr class="empty-row"><td colspan="7">点击「全部策略对比」查看</td></tr></tbody>
                             </table>
@@ -360,9 +396,9 @@ if (!localStorage.getItem('onboarding_done')) {
             <div class="page-header"><h2>交易日志</h2></div>
             <div class="panel">
                 <div class="table-container">
-                    <table class="data-table" id="trades-history-table">
+                    <table class="data-table" id="trades-history-table" role="table" aria-label="交易历史记录">
                         <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>入场价</th><th>出场价</th><th>盈亏</th><th>原因</th><th>笔记</th></tr></thead>
-                        <tbody><tr class="empty-row"><td colspan="8">暂无交易记录</td></tr></tbody>
+                        <tbody id="trades-history-tbody"><tr class="empty-row"><td colspan="8">暂无交易记录</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -375,16 +411,16 @@ if (!localStorage.getItem('onboarding_done')) {
                 <div class="panel">
                     <div class="panel-header"><h3>风控状态</h3></div>
                     <!-- 止损保护状态 -->
-                    <div class="safety-shield" id="safety-shield" style="background: linear-gradient(135deg, #1b5e20, #2e7d32); border-radius: 12px; padding: 20px; margin-bottom: 16px; text-align: center;">
-                        <div style="font-size: 48px; margin-bottom: 8px;">🛡️</div>
-                        <div style="font-size: 18px; font-weight: bold; color: #a5d6a7; margin-bottom: 4px;" id="safety-title">止损保护已开启</div>
-                        <div style="color: #81c784; font-size: 13px;" id="safety-detail">
+                    <div class="safety-shield" id="safety-shield">
+                        <div class="safety-shield-icon">🛡️</div>
+                        <div class="safety-shield-title" id="safety-title">止损保护已开启</div>
+                        <div class="safety-shield-detail" id="safety-detail">
                             单笔止损 5% | 日亏损上限 5% | 连续亏损熔断 3次
                         </div>
-                        <div style="margin-top: 12px; display: flex; justify-content: center; gap: 8px;" id="safety-badges">
-                            <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 12px; font-size: 12px; color: #c8e6c9;">✅ 止损单</span>
-                            <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 12px; font-size: 12px; color: #c8e6c9;">✅ 止盈单</span>
-                            <span style="background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 12px; font-size: 12px; color: #c8e6c9;">✅ 熔断机制</span>
+                        <div class="safety-shield-badges" id="safety-badges">
+                            <span class="safety-badge">✅ 止损单</span>
+                            <span class="safety-badge">✅ 止盈单</span>
+                            <span class="safety-badge">✅ 熔断机制</span>
                         </div>
                     </div>
                     <div class="risk-status" id="risk-status">
@@ -423,10 +459,10 @@ if (!localStorage.getItem('onboarding_done')) {
         <div id="page-lab" class="page">
             <div class="page-header">
                 <h2>🧪 策略实验室</h2>
-                <span style="font-size:12px;color:var(--text-muted)">快速测试，秒出结果</span>
+                <span class="lab-subtitle">快速测试，秒出结果</span>
             </div>
-            <div style="max-width:600px;margin:0 auto;">
-                <div class="panel" style="padding:20px;">
+            <div class="lab-container">
+                <div class="panel lab-panel">
                     <div class="form-group">
                         <label>选择策略</label>
                         <select id="lab-strategy" class="form-select">
@@ -449,13 +485,13 @@ if (!localStorage.getItem('onboarding_done')) {
                             <option>SOLUSDT</option><option>DOGEUSDT</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-block" onclick="runLabTest()" style="font-size:18px;padding:16px;margin-top:16px;">
+                    <button class="btn btn-primary btn-block lab-run-btn" onclick="runLabTest()">
                         🚀 开始测试
                     </button>
                 </div>
-                <div class="panel" id="lab-results-panel" style="display:none;margin-top:16px;padding:24px;text-align:center;">
-                    <div id="lab-summary" style="font-size:16px;color:var(--text-secondary);margin-bottom:20px;line-height:1.8;"></div>
-                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;" id="lab-metrics">
+                <div class="panel lab-results-panel" id="lab-results-panel">
+                    <div id="lab-summary" class="lab-summary"></div>
+                    <div class="lab-metrics-grid" id="lab-metrics">
                         <div class="lab-big-metric">
                             <div class="lab-big-label">收益率</div>
                             <div class="lab-big-value" id="lab-return">--</div>
@@ -479,16 +515,16 @@ if (!localStorage.getItem('onboarding_done')) {
                 <h2>🔌 策略商店</h2>
                 <div class="header-actions">
                     <button class="btn btn-primary" onclick="hotReloadStrategies()">🔄 热重载</button>
-                    <button class="btn" onclick="showDownloadModal()" style="background:var(--bg-hover);color:var(--text-primary);">+ 从URL安装</button>
+                    <button class="btn store-action-btn" onclick="showDownloadModal()">+ 从URL安装</button>
                 </div>
             </div>
 
             <!-- Download Modal (inline) -->
-            <div id="download-modal" class="modal" style="display:none">
+            <div id="download-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-label="从URL安装策略">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h3>从URL安装策略</h3>
-                        <button class="modal-close" onclick="closeDownloadModal()">✕</button>
+                        <button class="modal-close" onclick="closeDownloadModal()" aria-label="关闭">✕</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
@@ -505,28 +541,28 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
 
             <!-- Source View Modal -->
-            <div id="source-modal" class="modal" style="display:none">
-                <div class="modal-content" style="max-width:800px;">
+            <div id="source-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-label="查看策略源码">
+                <div class="modal-content source-modal-content">
                     <div class="modal-header">
                         <h3 id="source-modal-title">策略源码</h3>
-                        <button class="modal-close" onclick="closeSourceModal()">✕</button>
+                        <button class="modal-close" onclick="closeSourceModal()" aria-label="关闭">✕</button>
                     </div>
                     <div class="modal-body">
-                        <pre id="source-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
+                        <pre id="source-content" class="source-code-pre"></pre>
                     </div>
                 </div>
             </div>
 
             <!-- Template Modal -->
-            <div id="template-modal" class="modal" style="display:none">
-                <div class="modal-content" style="max-width:800px;">
+            <div id="template-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-label="策略开发模板">
+                <div class="modal-content source-modal-content">
                     <div class="modal-header">
                         <h3>策略开发模板</h3>
-                        <button class="modal-close" onclick="closeTemplateModal()">✕</button>
+                        <button class="modal-close" onclick="closeTemplateModal()" aria-label="关闭">✕</button>
                     </div>
                     <div class="modal-body">
-                        <pre id="template-content" style="background:var(--bg-card);color:var(--text-primary);padding:16px;border-radius:8px;overflow:auto;max-height:500px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-all;"></pre>
-                        <button class="btn btn-primary btn-block" style="margin-top:16px;" onclick="copyTemplate()">📋 复制模板</button>
+                        <pre id="template-content" class="source-code-pre"></pre>
+                        <button class="btn btn-primary btn-block template-copy-btn" onclick="copyTemplate()">📋 复制模板</button>
                     </div>
                 </div>
             </div>
@@ -535,10 +571,10 @@ if (!localStorage.getItem('onboarding_done')) {
             <div class="panel">
                 <div class="panel-header">
                     <h3>已安装策略</h3>
-                    <span id="strategy-store-count" style="font-size:12px;color:var(--text-muted);"></span>
+                    <span id="strategy-store-count" class="store-count"></span>
                 </div>
                 <div class="table-container">
-                    <table class="data-table" id="strategy-store-table">
+                    <table class="data-table" id="strategy-store-table" role="table" aria-label="已安装策略列表">
                         <thead>
                             <tr>
                                 <th>策略名称</th>
@@ -556,11 +592,11 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
 
             <!-- Quick Actions -->
-            <div class="panel" style="margin-top:16px;">
+            <div class="panel store-quick-actions">
                 <div class="panel-header"><h3>快捷操作</h3></div>
-                <div style="display:flex;gap:12px;padding:16px;flex-wrap:wrap;">
-                    <button class="btn" onclick="getStrategyTemplate()" style="background:var(--bg-hover);color:var(--text-primary);">📄 获取开发模板</button>
-                    <button class="btn" onclick="discoverStrategies()" style="background:var(--bg-hover);color:var(--text-primary);">🔍 扫描策略</button>
+                <div class="store-quick-actions-inner">
+                    <button class="btn store-action-btn" onclick="getStrategyTemplate()">📄 获取开发模板</button>
+                    <button class="btn store-action-btn" onclick="discoverStrategies()">🔍 扫描策略</button>
                 </div>
             </div>
         </div>
@@ -595,12 +631,67 @@ if (!localStorage.getItem('onboarding_done')) {
             <div class="panel">
                 <div class="panel-header"><h3>备份列表</h3></div>
                 <div class="table-container">
-                    <table class="data-table" id="backups-table">
+                    <table class="data-table" id="backups-table" role="table" aria-label="备份列表">
                         <thead><tr><th>文件名</th><th>大小</th><th>创建时间</th><th>操作</th></tr></thead>
                         <tbody id="backups-tbody">
                             <tr class="empty-row"><td colspan="4">暂无备份</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Exchange Settings Page -->
+        <div id="page-exchange" class="page">
+            <div class="page-header">
+                <h2>🏦 交易所设置</h2>
+                <div class="header-actions">
+                    <button class="btn-sm" onclick="refreshExchangeConfig()">🔄 刷新</button>
+                </div>
+            </div>
+
+            <!-- 当前状态 -->
+            <div class="panel" style="margin-bottom:16px;">
+                <div class="panel-header"><h3>当前配置</h3></div>
+                <div style="padding:16px;" id="exchange-status">
+                    <div style="color:var(--text-muted);text-align:center;padding:20px;">加载中...</div>
+                </div>
+            </div>
+
+            <!-- API Key 表单 -->
+            <div class="panel">
+                <div class="panel-header"><h3>更新 API Key</h3></div>
+                <div style="padding:16px;">
+                    <div class="form-group">
+                        <label>交易所</label>
+                        <select id="ex-set-exchange" class="form-select" onchange="onExSetExchangeChange()">
+                            <option value="binance">币安 Binance</option>
+                            <option value="okx">欧易 OKX</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="text" id="ex-set-apikey" class="form-input" placeholder="请输入API Key" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>API Secret</label>
+                        <input type="password" id="ex-set-secret" class="form-input" placeholder="请输入API Secret" autocomplete="off">
+                    </div>
+                    <div class="form-group" id="ex-set-password-group" style="display:none;">
+                        <label>API 密码 (Passphrase) <span style="color:var(--orange);font-size:11px;">OKX 必填</span></label>
+                        <input type="password" id="ex-set-password" class="form-input" placeholder="请输入OKX API密码" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="ex-set-testnet" checked style="accent-color:var(--accent);">
+                            <span>使用模拟盘 (Testnet)</span>
+                        </label>
+                    </div>
+                    <div style="display:flex;gap:12px;">
+                        <button class="btn btn-primary" onclick="testExConnection()" style="flex:1;">🔍 测试连接</button>
+                        <button class="btn" onclick="saveExKeys()" style="flex:1;background:var(--bg-hover);color:var(--text-primary);">💾 保存配置</button>
+                    </div>
+                    <div id="ex-test-result" style="margin-top:12px;font-size:13px;text-align:center;min-height:20px;"></div>
                 </div>
             </div>
         </div>
@@ -612,7 +703,7 @@ if (!localStorage.getItem('onboarding_done')) {
             <!-- 添加告警表单 -->
             <div class="panel" style="margin-bottom:16px;">
                 <div class="panel-header"><h3>添加新告警</h3></div>
-                <div style="padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;align-items:end;">
+                <div class="alerts-form-grid">
                     <div class="form-group">
                         <label>告警类型</label>
                         <select id="alert-type" class="form-select" onchange="onAlertTypeChange()">
@@ -639,7 +730,7 @@ if (!localStorage.getItem('onboarding_done')) {
                         <label id="alert-value-label">阈值</label>
                         <input type="number" id="alert-value" class="form-input" value="60000" step="0.01">
                     </div>
-                    <div class="form-group" style="grid-column:1/-1;">
+                    <div class="form-group alerts-form-full-row">
                         <label>描述（可选）</label>
                         <input type="text" id="alert-message" class="form-input" placeholder="例如：BTC价格突破60000提醒">
                     </div>
@@ -656,7 +747,7 @@ if (!localStorage.getItem('onboarding_done')) {
                     <button class="btn-sm" onclick="refreshAlerts()">🔄 刷新</button>
                 </div>
                 <div class="table-container">
-                    <table class="data-table" id="alerts-table">
+                    <table class="data-table" id="alerts-table" role="table" aria-label="告警列表">
                         <thead><tr><th>类型</th><th>交易对</th><th>条件</th><th>阈值</th><th>描述</th><th>状态</th><th>操作</th></tr></thead>
                         <tbody id="alerts-tbody">
                             <tr class="empty-row"><td colspan="7">暂无自定义告警</td></tr>
@@ -683,60 +774,60 @@ if (!localStorage.getItem('onboarding_done')) {
             </div>
 
             <!-- Loading -->
-            <div id="recommend-loading" style="text-align:center;padding:40px;">
+            <div id="recommend-loading" class="rec-loading">
                 <div class="spinner"></div>
-                <div style="color:var(--text-muted);margin-top:12px;">正在分析市场状态...</div>
+                <div class="rec-loading-text">正在分析市场状态...</div>
             </div>
 
             <!-- Market State Cards -->
-            <div id="recommend-content" style="display:none;">
+            <div id="recommend-content" class="rec-content">
                 <div class="stats-grid" style="margin-bottom:16px;">
-                    <div class="stat-card" style="text-align:center;">
+                    <div class="stat-card rec-stat-card">
                         <div class="stat-label">趋势强度</div>
-                        <div style="margin:8px 0;">
-                            <div style="height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;">
-                                <div id="rec-trend-bar" style="height:100%;background:linear-gradient(90deg, var(--blue), var(--green));border-radius:4px;transition:width 0.6s ease;"></div>
+                        <div class="rec-trend-bar-wrap">
+                            <div class="rec-trend-bar-bg">
+                                <div id="rec-trend-bar" class="rec-trend-bar-fill"></div>
                             </div>
                         </div>
-                        <div class="stat-value" id="rec-trend-strength" style="font-size:18px;">--</div>
+                        <div class="stat-value rec-trend-strength" id="rec-trend-strength">--</div>
                     </div>
-                    <div class="stat-card" style="text-align:center;">
+                    <div class="stat-card rec-stat-card">
                         <div class="stat-label">趋势方向</div>
-                        <div class="stat-value" id="rec-trend-dir" style="font-size:28px;">--</div>
+                        <div class="stat-value rec-trend-dir" id="rec-trend-dir">--</div>
                     </div>
-                    <div class="stat-card" style="text-align:center;">
+                    <div class="stat-card rec-stat-card">
                         <div class="stat-label">波动率</div>
-                        <div class="stat-value" id="rec-volatility" style="font-size:18px;">--</div>
+                        <div class="stat-value rec-volatility" id="rec-volatility">--</div>
                     </div>
-                    <div class="stat-card" style="text-align:center;">
+                    <div class="stat-card rec-stat-card">
                         <div class="stat-label">RSI</div>
-                        <div style="margin:8px 0;position:relative;">
-                            <canvas id="rec-rsi-gauge" width="80" height="80" style="display:block;margin:0 auto;"></canvas>
+                        <div class="rec-rsi-gauge-wrap">
+                            <canvas id="rec-rsi-gauge" class="rec-rsi-gauge" width="80" height="80"></canvas>
                         </div>
-                        <div class="stat-value" id="rec-rsi-value" style="font-size:18px;">--</div>
+                        <div class="stat-value rec-rsi-value" id="rec-rsi-value">--</div>
                     </div>
                 </div>
 
                 <!-- Market Summary -->
-                <div class="panel" id="rec-summary-panel" style="margin-bottom:16px;">
+                <div class="panel rec-summary-panel" id="rec-summary-panel">
                     <div class="panel-header"><h3>📋 市场状态总结</h3></div>
-                    <div style="padding:16px;" id="rec-summary-text">
+                    <div class="rec-summary-text" id="rec-summary-text">
                         <!-- JS动态填充 -->
                     </div>
                 </div>
 
                 <!-- Error Message -->
-                <div id="rec-error-msg" style="display:none;background:rgba(255,167,38,0.1);border:1px solid var(--orange);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;color:var(--orange);"></div>
+                <div id="rec-error-msg" class="rec-error-msg"></div>
 
                 <!-- Price Info -->
-                <div id="rec-price-info" style="margin-bottom:16px;font-size:14px;color:var(--text-secondary);">
-                    当前价格: <span id="rec-current-price" style="color:var(--text-primary);font-weight:600;">--</span>
+                <div id="rec-price-info" class="rec-price-info">
+                    当前价格: <span id="rec-current-price" class="rec-current-price">--</span>
                 </div>
 
                 <!-- Strategy Recommendations -->
                 <div class="panel">
                     <div class="panel-header"><h3>🏆 推荐策略 Top 5</h3></div>
-                    <div id="rec-strategies" style="padding:12px;">
+                    <div id="rec-strategies" class="rec-strategies-container">
                         <!-- JS动态填充 -->
                     </div>
                 </div>
@@ -747,11 +838,11 @@ if (!localStorage.getItem('onboarding_done')) {
 </div>
 
 <!-- Strategy Modal -->
-<div id="strategy-modal" class="modal" style="display:none">
+<div id="strategy-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-label="创建策略实例">
     <div class="modal-content">
         <div class="modal-header">
             <h3>创建策略实例</h3>
-            <button class="modal-close" onclick="closeStrategyModal()">✕</button>
+            <button class="modal-close" onclick="closeStrategyModal()" aria-label="关闭">✕</button>
         </div>
         <div class="modal-body">
             <div class="form-group">

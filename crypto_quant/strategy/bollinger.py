@@ -13,6 +13,12 @@ from typing import Dict, List
 import numpy as np
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_SIGNAL_QUALITY_THRESHOLD = 0.75
+_ADAPTIVE_BANDWIDTH_LOOKBACK = 20
+_DEFAULT_ADX_PERIOD = 14
+_DEFAULT_ADX_THRESHOLD = 25
+
 
 class BollingerBandsStrategy(Strategy):
     """Bollinger Bands Mean Reversion with adaptive bandwidth, volume confirmation, and RSI filter."""
@@ -94,8 +100,8 @@ class BollingerBandsStrategy(Strategy):
         base_std = self.get_param('std_dev', 2.0)
         expansion = self.get_param('vol_expansion_factor', 1.5)
 
-        if i >= 20:
-            recent_atr = atr[max(0, i - 20):i+1]
+        if i >= _ADAPTIVE_BANDWIDTH_LOOKBACK:
+            recent_atr = atr[max(0, i - _ADAPTIVE_BANDWIDTH_LOOKBACK):i+1]
             atr_mean = np.nanmean(recent_atr)
             if atr_mean > 0:
                 ratio = atr[i] / atr_mean
@@ -175,7 +181,7 @@ class BollingerBandsStrategy(Strategy):
         if use_reversal and pos == 0 and self.get_param('use_adx_trend_filter', True):
             if self.is_trending_adx(
                 self.data['high'].values, self.data['low'].values, self.data['close'].values,
-                i, period=14, threshold=self.get_param('adx_trend_threshold', 25)
+                i, period=_DEFAULT_ADX_PERIOD, threshold=self.get_param('adx_trend_threshold', _DEFAULT_ADX_THRESHOLD)
             ):
                 return Signal(SignalType.HOLD, "", price, reason="ADX趋势过滤:暂停均值回归")
 
@@ -196,7 +202,7 @@ class BollingerBandsStrategy(Strategy):
                         return Signal(SignalType.HOLD, "", price)
                     if not self._rsi_confirmed_short(i):
                         return Signal(SignalType.HOLD, "", price)
-                    if self.signal_quality_score(i, 'SELL') < 0.75:
+                    if self.signal_quality_score(i, 'SELL') < _SIGNAL_QUALITY_THRESHOLD:
                         return Signal(SignalType.HOLD, "", price, reason="信号质量不足")
 
                     reason = f"触及上轨({adjusted_upper:.2f}, 带宽x{band_width_mult:.2f})，做空"
@@ -208,7 +214,7 @@ class BollingerBandsStrategy(Strategy):
                         return Signal(SignalType.HOLD, "", price)
                     if not self._rsi_confirmed_long(i):
                         return Signal(SignalType.HOLD, "", price)
-                    if self.signal_quality_score(i, 'BUY') < 0.75:
+                    if self.signal_quality_score(i, 'BUY') < _SIGNAL_QUALITY_THRESHOLD:
                         return Signal(SignalType.HOLD, "", price, reason="信号质量不足")
 
                     reason = f"触及下轨({adjusted_lower:.2f}, 带宽x{band_width_mult:.2f})，做多"

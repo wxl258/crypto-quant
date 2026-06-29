@@ -14,6 +14,8 @@ from evolution_core import dominates, pareto_frontier, multi_objective_fitness, 
 
 # ============ EVOLUTION ENGINE v3 ============
 
+_MAX_EVOLUTION_LOG = 1000
+
 class EvolutionEngineV3:
     """Walk-Forward + Pareto + Bayesian self-evolution engine."""
 
@@ -185,6 +187,23 @@ class EvolutionEngineV3:
             'n_iterations': n_iterations,
             'fold_results': fold_results,
         })
+
+        # Persist to SQLite
+        try:
+            generation = len(self._evolution_log)
+            self.store.save_evolution_log({
+                'generation': generation,
+                'best_fitness': round(last_fold_test, 4),
+                'best_params': final_best['params'],
+                'timestamp': datetime.now().isoformat(),
+            })
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to persist evolution log: {e}")
+
+        # Trim evolution log to prevent unbounded memory growth
+        if len(self._evolution_log) > _MAX_EVOLUTION_LOG:
+            self._evolution_log = self._evolution_log[-500:]
 
         return {
             'strategy': strategy_name,

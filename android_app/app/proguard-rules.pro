@@ -4,6 +4,9 @@
 
 # Keep Chaquopy Python classes
 -keep class com.chaquo.python.** { *; }
+-keep class org.python.** { *; }
+-keepattributes *Annotation*
+-keepattributes SourceFile,LineNumberTable
 
 # Keep WebView JavaScript interface
 -keepclassmembers class * {

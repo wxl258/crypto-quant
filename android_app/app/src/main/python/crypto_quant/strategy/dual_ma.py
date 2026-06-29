@@ -18,6 +18,9 @@ from typing import Dict, List
 import numpy as np
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_NO_ENTRY_BARS_HELD = 999
+
 
 class DualMAStrategy(Strategy):
     """Triple-confirmation MA crossover with volume filter and minimum hold."""
@@ -115,7 +118,7 @@ class DualMAStrategy(Strategy):
         if not self._valid(fast[i], medium[i], slow[i], fast[i-1], medium[i-1], slow[i-1]):
             return Signal(SignalType.HOLD, "", price)
 
-        bars_held = i - self._entry_bar if self._entry_bar >= 0 else 999
+        bars_held = i - self._entry_bar if self._entry_bar >= 0 else _NO_ENTRY_BARS_HELD
 
         # ── ATR stop loss check ──
         if pos != 0 and atr_stop_mult > 0 and atr is not None and not np.isnan(atr[i]):

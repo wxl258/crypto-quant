@@ -83,9 +83,15 @@ class TradingEnv:
         self.rsi_vals = self.features['rsi_14'].values if 'rsi_14' in self.features.columns else np.full(len(self.df), np.nan)
         self.macd_vals = self.features['macd_histogram'].values if 'macd_histogram' in self.features.columns else np.full(len(self.df), np.nan)
 
-        # BB position
+        # BB position — pre-compute lower/upper bands from bb_width
         bb_width = self.features['bb_width'].values if 'bb_width' in self.features.columns else np.full(len(self.df), np.nan)
         self.bb_width = bb_width
+
+        self.bb_lower = np.full(len(self.df), np.nan)
+        self.bb_upper = np.full(len(self.df), np.nan)
+        valid = ~np.isnan(bb_width) & (bb_width > 0)
+        self.bb_lower[valid] = self.close[valid] - bb_width[valid] * self.close[valid] / 2
+        self.bb_upper[valid] = self.close[valid] + bb_width[valid] * self.close[valid] / 2
 
         self.vol_ratio = self.features['volume_ratio'].values if 'volume_ratio' in self.features.columns else np.full(len(self.df), np.nan)
 
@@ -250,12 +256,12 @@ class TradingEnv:
 
         Terminates when:
         - All bars processed
-        - Capital falls below 10% of initial capital
+        - Equity (capital + unrealized PnL) falls below 10% of initial capital
         """
         if self.current_step >= self.n_bars - 1:
             return True
 
-        if self.capital < self.initial_capital * 0.1:
+        if self._compute_equity() < self.initial_capital * 0.1:
             return True
 
         return False
@@ -284,13 +290,10 @@ class TradingEnv:
 
         # BB position (0 = lower band, 0.5 = middle, 1 = upper band)
         bb_pos = 0.5
-        if not np.isnan(self.bb_width[self.current_step]) and self.bb_width[self.current_step] > 0:
-            bb_mid = self.close[self.current_step]
-            bb_lower = self.close[self.current_step] - self.bb_width[self.current_step] * self.close[self.current_step] / 2
-            bb_upper = self.close[self.current_step] + self.bb_width[self.current_step] * self.close[self.current_step] / 2
-            if bb_upper > bb_lower:
-                bb_pos = (self.close[self.current_step] - bb_lower) / (bb_upper - bb_lower)
-                bb_pos = np.clip(bb_pos, 0.0, 1.0)
+        bb_l = self.bb_lower[self.current_step]
+        bb_u = self.bb_upper[self.current_step]
+        if not np.isnan(bb_l) and not np.isnan(bb_u) and bb_u > bb_l:
+            bb_pos = np.clip((self.close[self.current_step] - bb_l) / (bb_u - bb_l), 0.0, 1.0)
 
         # Volume ratio
         vol_r = self.vol_ratio[self.current_step]

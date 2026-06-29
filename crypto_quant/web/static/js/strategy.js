@@ -88,7 +88,11 @@ function renderStrategyCards(strategies) {
     if (!grid) return;
 
     if (strategies.length === 0) {
-        grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:40px;">没有匹配的策略</div>';
+        if (typeof renderEmptyStrategies === 'function') {
+            renderEmptyStrategies();
+        } else {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted);padding:60px 20px;font-size:15px;">🔍 没有匹配的策略</div>';
+        }
         return;
     }
 
@@ -96,12 +100,27 @@ function renderStrategyCards(strategies) {
         const guide = (typeof STRATEGY_GUIDE !== 'undefined' && STRATEGY_GUIDE[s.name]) || null;
         const name = guide ? guide.name : getStrategyLabel(s.name);
         const icon = guide ? guide.icon : '📈';
-        const description = guide ? guide.description : (s.description || '无描述');
+        const description = guide ? guide.description : (s.description || '暂无描述');
         const difficulty = guide ? guide.difficulty : '';
         const diffColor = difficulty ? (DIFFICULTY_COLORS[difficulty] || '#888') : '#888';
         const tips = guide ? guide.tips : '';
         const suitable = guide ? guide.suitable : '';
         const unsuitable = guide ? guide.unsuitable : '';
+
+        // Build params HTML from API data
+        const paramsList = (s.parameters || []);
+        const paramsHTML = paramsList.length > 0 ? `
+            <div class="card-params">
+                ${paramsList.slice(0, 6).map(p => {
+                    const guideParam = guide && guide.params ? guide.params[p.name] : null;
+                    const paramLabel = guideParam ? guideParam.name : (p.label || p.name);
+                    return `
+                    <div class="param-row">
+                        <span class="param-label">${escHtml(paramLabel)}</span>
+                        <span class="param-value">${escHtml(String(p.default ?? '—'))}</span>
+                    </div>`;
+                }).join('')}
+            </div>` : '';
 
         return `
         <div class="strategy-card">
@@ -112,26 +131,16 @@ function renderStrategyCards(strategies) {
                     ${difficulty ? `<span class="card-badge" style="background:${diffColor}20;color:${diffColor};border:1px solid ${diffColor}40">${difficulty}</span>` : ''}
                 </div>
             </div>
-            <p class="desc">${escHtml(description)}</p>
-            ${suitable ? `<div class="card-tag tag-green">✅ 适合: ${escHtml(suitable)}</div>` : ''}
-            ${unsuitable ? `<div class="card-tag tag-red">⚠️ 不适合: ${escHtml(unsuitable)}</div>` : ''}
-            <div class="params">
-                ${(s.parameters || []).map(p => {
-                    const guideParam = guide && guide.params ? guide.params[p.name] : null;
-                    const paramDesc = guideParam ? guideParam.desc : '';
-                    const paramName = guideParam ? guideParam.name : p.label;
-                    return `
-                    <div class="param-item">
-                        <span class="param-label">${escHtml(paramName)}</span>
-                        <span class="param-value">${escHtml(String(p.default))}</span>
-                        ${paramDesc ? `<span class="param-desc">${escHtml(paramDesc)}</span>` : ''}
-                    </div>`;
-                }).join('')}
+            <p class="card-desc">${escHtml(description)}</p>
+            <div class="card-tags">
+                ${suitable ? `<span class="card-tag card-tag-green">✅ ${escHtml(suitable)}</span>` : ''}
+                ${unsuitable ? `<span class="card-tag card-tag-red">⚠️ ${escHtml(unsuitable)}</span>` : ''}
             </div>
-            ${tips ? `<p class="tips">💡 ${escHtml(tips)}</p>` : ''}
+            ${paramsHTML}
+            ${tips ? `<div class="card-tips">💡 ${escHtml(tips)}</div>` : ''}
             <div class="card-actions">
-                <button class="btn-sm-card primary" onclick="showStrategyModal('${s.name}')">创建实例</button>
-                <button class="btn-sm-card" onclick="smartOptimize('${s.name}')" style="border-color:var(--orange);color:var(--orange);">🎯 智能优化</button>
+                <button class="btn-sm-card primary" onclick="showStrategyModal('${s.name}')">⚡ 创建实例</button>
+                <button class="btn-sm-card accent2" onclick="smartOptimize('${s.name}')">🎯 智能优化</button>
             </div>
         </div>`;
     }).join('');

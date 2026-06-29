@@ -1,13 +1,20 @@
 package com.cryptoquant.app
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -16,9 +23,9 @@ import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
-import java.util.concurrent.Executors
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import com.cryptoquant.app.service.QuantForegroundService
 
 class MainActivity : AppCompatActivity() {
 
@@ -27,12 +34,35 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var detailText: TextView
-    private var pythonReady = false
     private val serverPort = 8000
-    private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
-    private var retryCount = 0
-    private val maxRetries = 60
+
+    // ForegroundService 绑定
+    private var quantService: QuantForegroundService? = null
+    private var serviceBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as QuantForegroundService.LocalBinder
+            quantService = binder.getService()
+            serviceBound = true
+
+            // 注册回调
+            quantService?.onStatusUpdate = { status, detail ->
+                updateUI(status, detail)
+            }
+            quantService?.onServerReady = {
+                handler.post {
+                    webView.loadUrl("http://127.0.0.1:$serverPort")
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            quantService = null
+            serviceBound = false
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +76,46 @@ class MainActivity : AppCompatActivity() {
 
         setupWebView()
         createNotificationChannel()
-        startPythonServer()
+
+        // 请求通知权限（Android 13+）
+        requestNotificationPermissionIfNeeded()
+
+        // 启动 ForegroundService 来管理 Python 引擎
+        startQuantService()
+
+        // 检查电池优化白名单
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                // Show a dialog suggesting user add to whitelist
+                // For now, just log a warning
+                android.util.Log.w("MainActivity", "App not in battery optimization whitelist")
+            }
+        }
+    }
+
+    private fun startQuantService() {
+        loadingView.visibility = View.VISIBLE
+        webView.visibility = View.GONE
+        statusText.text = getString(R.string.loading_message)
+        detailText.text = ""
+        progressBar.visibility = View.VISIBLE
+
+        val intent = Intent(this, QuantForegroundService::class.java).apply {
+            putExtra("server_port", serverPort)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+
+        bindService(
+            Intent(this, QuantForegroundService::class.java),
+            serviceConnection,
+            Context.BIND_AUTO_CREATE
+        )
     }
 
     private fun setupWebView() {
@@ -54,10 +123,15 @@ class MainActivity : AppCompatActivity() {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                allowFileAccess = true
+                // 生产环境关闭文件访问
+                if (BuildConfig.DEBUG) {
+                    allowFileAccess = true
+                } else {
+                    allowFileAccess = false
+                }
                 allowContentAccess = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                cacheMode = WebSettings.LOAD_DEFAULT
+                cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                 setSupportZoom(true)
                 builtInZoomControls = true
                 displayZoomControls = false
@@ -68,7 +142,7 @@ class MainActivity : AppCompatActivity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    if (pythonReady) {
+                    if (quantService?.isServerReady() == true) {
                         showWebView()
                     }
                 }
@@ -79,7 +153,7 @@ class MainActivity : AppCompatActivity() {
                     description: String?,
                     failingUrl: String?
                 ) {
-                    if (!pythonReady) {
+                    if (quantService?.isServerReady() != true) {
                         view?.postDelayed({
                             view?.loadUrl("http://127.0.0.1:$serverPort")
                         }, 2000)
@@ -88,81 +162,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             webChromeClient = WebChromeClient()
-        }
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun startPythonServer() {
-        loadingView.visibility = View.VISIBLE
-        webView.visibility = View.GONE
-        statusText.text = getString(R.string.loading_message)
-        detailText.text = ""
-        progressBar.visibility = View.VISIBLE
-
-        executor.execute {
-            try {
-                updateUI("正在初始化 Python 环境...", "")
-
-                // Initialize Python
-                if (!Python.isStarted()) {
-                    Python.start(AndroidPlatform(this@MainActivity))
-                }
-
-                updateUI("正在启动交易引擎...", "加载量化系统模块")
-
-                // Get Python instance and run the bridge (returns immediately)
-                val py = Python.getInstance()
-                val module = py.getModule("crypto_quant_bridge")
-                module.callAttr("start_server", serverPort)
-
-                // Poll for server readiness
-                updateUI("等待交易引擎就绪...", "尝试连接本地服务")
-                pythonReady = false
-
-                for (i in 1..maxRetries) {
-                    try {
-                        val url = java.net.URL("http://127.0.0.1:$serverPort/health")
-                        val conn = url.openConnection() as java.net.HttpURLConnection
-                        conn.connectTimeout = 2000
-                        conn.readTimeout = 2000
-                        val code = conn.responseCode
-                        conn.disconnect()
-                        if (code == 200) {
-                            pythonReady = true
-                            break
-                        }
-                    } catch (e: Exception) {
-                        // Server not ready yet
-                    }
-
-                    val msg = "等待交易引擎就绪... ($i/$maxRetries)"
-                    updateUI(msg, "正在启动量化系统服务")
-                    Thread.sleep(500)
-                }
-
-                if (pythonReady) {
-                    updateUI("交易引擎已启动！", "正在加载界面...")
-                    handler.post {
-                        webView.loadUrl("http://127.0.0.1:$serverPort")
-                    }
-                } else {
-                    updateUI("启动超时", "服务器未能就绪，请尝试重启APP")
-                    progressBar.visibility = View.GONE
-                }
-
-            } catch (e: Exception) {
-                val errMsg = e.message ?: "未知错误"
-                val errDetail = e.cause?.message ?: e.javaClass.simpleName
-                e.printStackTrace()
-                updateUI("启动失败: $errMsg", errDetail)
-                progressBar.visibility = View.GONE
-                handler.post {
-                    statusText.setOnClickListener {
-                        retryCount++
-                        startPythonServer()
-                    }
-                }
-            }
         }
     }
 
@@ -179,6 +178,39 @@ class MainActivity : AppCompatActivity() {
         webView.visibility = View.VISIBLE
     }
 
+    // ── 通知权限（Android 13+） ──
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_NOTIFICATION_PERMISSION
+                )
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            // 无论用户是否授权，服务仍需启动
+            if (grantResults.isNotEmpty() && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                // 用户拒绝了通知权限 — 仍可运行但前台通知不会显示
+            }
+        }
+    }
+
+    // ── 通知渠道 ──
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -187,25 +219,36 @@ class MainActivity : AppCompatActivity() {
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "CryptoQuant 量化交易引擎服务通知"
+                setShowBadge(false)
             }
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
     }
 
+    // ── 生命周期 ──
+
     override fun onBackPressed() {
         if (webView.canGoBack()) {
             webView.goBack()
         } else {
+            // 退到后台，但服务继续运行
             moveTaskToBack(true)
         }
     }
 
     override fun onDestroy() {
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
         super.onDestroy()
+        // 注意：不在此处 stopService — 用户可能只是旋转屏幕
+        // 服务会在 APP 进程被杀死时自动清理
     }
 
     companion object {
         const val CHANNEL_ID = "cryptoquant_service"
+        private const val REQUEST_NOTIFICATION_PERMISSION = 100
     }
 }

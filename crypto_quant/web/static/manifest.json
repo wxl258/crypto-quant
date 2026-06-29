@@ -1,0 +1,22 @@
+{
+  "name": "CryptoQuant - 加密货币量化交易系统",
+  "short_name": "CryptoQuant",
+  "description": "智能策略驱动，让交易更简单",
+  "start_url": "/static/index.html",
+  "display": "standalone",
+  "background_color": "#07080c",
+  "theme_color": "#07080c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -6,6 +6,8 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import logging
 
+from strategy.features import FeatureEngineer
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,8 +66,8 @@ class StrategyRecommender:
                 "bullish": 3, "bearish": 3, "sideways": 10, "extreme_rsi": 5,
             },
             "funding_arb": {
-                "strong_trend": 5, "weak_trend": 5, "high_vol": 5, "low_vol": 5,
-                "bullish": 5, "bearish": 5, "sideways": 5, "extreme_rsi": 5,
+                "strong_trend": 5, "weak_trend": 7, "high_vol": 5, "low_vol": 8,
+                "bullish": 5, "bearish": 5, "sideways": 8, "extreme_rsi": 5,
             },
             "ensemble_balanced": {
                 "strong_trend": 6, "weak_trend": 7, "high_vol": 6, "low_vol": 6,
@@ -111,58 +113,46 @@ class StrategyRecommender:
     
     def analyze_market(self, closes: np.ndarray, highs: np.ndarray, 
                        lows: np.ndarray, volumes: np.ndarray) -> MarketState:
-        """分析当前市场状态"""
+        """分析当前市场状态，使用统一的 FeatureEngineer 计算指标。"""
         if len(closes) < 50:
             return MarketState(0.5, "neutral", 0.5, "normal", 0, 50, 1.0, 0.5)
-        
-        # 趋势强度 (ADX简化版)
-        tr = np.maximum(highs[-14:] - lows[-14:], 
-                        np.abs(highs[-14:] - np.roll(closes[-15:-1], 1)[:14]),
-                        np.abs(lows[-14:] - np.roll(closes[-15:-1], 1)[:14]))
-        atr = np.mean(tr) if len(tr) > 0 else 1
-        
-        # 价格变化
+
+        # 使用 FeatureEngineer 统一计算指标
+        df_dict = {
+            'close': closes, 'high': highs, 'low': lows, 'volume': volumes,
+        }
+        import pandas as pd
+        df = pd.DataFrame(df_dict)
+        features = FeatureEngineer.compute_features(df)
+
+        # 趋势强度 (ADX归一化)
+        adx_val = features['adx'].iloc[-1] if 'adx' in features.columns else 25
+        trend_strength = min(float(adx_val) / 50, 1.0) if not np.isnan(adx_val) else 0.5
+
+        # 趋势方向
         price_change = (closes[-1] - closes[-20]) / closes[-20] if closes[-20] != 0 else 0
         trend_direction = "up" if price_change > 0.02 else "down" if price_change < -0.02 else "neutral"
-        
-        # ADX代理
-        dm_plus = np.maximum(highs[-14:] - np.roll(highs[-15:-1], 1)[:14], 0)
-        dm_minus = np.maximum(np.roll(lows[-15:-1], 1)[:14] - lows[-14:], 0)
-        di_plus = np.mean(dm_plus) / atr * 100 if atr > 0 else 25
-        di_minus = np.mean(dm_minus) / atr * 100 if atr > 0 else 25
-        dx = abs(di_plus - di_minus) / (di_plus + di_minus) * 100 if (di_plus + di_minus) > 0 else 0
-        trend_strength = min(dx / 50, 1.0)  # 归一化到0-1
-        
+
         # 波动率
-        if len(closes) >= 21:
-            returns = np.diff(closes[-21:]) / closes[-21:-1]
-        else:
-            returns = np.diff(closes) / closes[:-1]
-        volatility = np.std(returns) * np.sqrt(365) if len(returns) > 0 else 0.5
-        vol_regime = "high" if volatility > 0.8 else "low" if volatility < 0.3 else "normal"
-        
+        vol_val = features['atr_ratio'].iloc[-1] if 'atr_ratio' in features.columns else 0.02
+        volatility = float(vol_val) if not np.isnan(vol_val) else 0.5
+        vol_regime = "high" if volatility > 0.03 else "low" if volatility < 0.01 else "normal"
+
         # 动量
         momentum = (closes[-1] - closes[-10]) / closes[-10] if closes[-10] != 0 else 0
-        
+
         # RSI
-        gains = np.maximum(np.diff(closes[-15:]), 0)
-        losses = np.abs(np.minimum(np.diff(closes[-15:]), 0))
-        avg_gain = np.mean(gains) if len(gains) > 0 else 0
-        avg_loss = np.mean(losses) if len(losses) > 0 else 1
-        rs = avg_gain / avg_loss if avg_loss > 0 else 100
-        rsi = 100 - (100 / (1 + rs))
-        
+        rsi_val = features['rsi'].iloc[-1] if 'rsi' in features.columns else 50
+        rsi = float(rsi_val) if not np.isnan(rsi_val) else 50
+
         # 量比
-        recent_vol = np.mean(volumes[-5:]) if len(volumes) >= 5 else 1
-        avg_vol = np.mean(volumes[-20:]) if len(volumes) >= 20 else 1
-        volume_ratio = recent_vol / avg_vol if avg_vol > 0 else 1.0
-        
+        vr_val = features['volume_ratio'].iloc[-1] if 'volume_ratio' in features.columns else 1.0
+        volume_ratio = float(vr_val) if not np.isnan(vr_val) else 1.0
+
         # 布林带位置
-        bb_mid = np.mean(closes[-20:])
-        bb_std = np.std(closes[-20:])
-        bb_position = (closes[-1] - (bb_mid - 2*bb_std)) / (4*bb_std) if bb_std > 0 else 0.5
-        bb_position = max(0, min(1, bb_position))
-        
+        bb_val = features['bb_position'].iloc[-1] if 'bb_position' in features.columns else 0.5
+        bb_position = float(np.clip(bb_val, 0, 1)) if not np.isnan(bb_val) else 0.5
+
         return MarketState(
             trend_strength=trend_strength,
             trend_direction=trend_direction,

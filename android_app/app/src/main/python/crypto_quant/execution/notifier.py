@@ -98,7 +98,8 @@ class TradeNotifier:
                         app_name="量化交易系统",
                         timeout=5,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"System notification failed (non-critical): {e}")
                     pass
             
             logger.info(f"通知: {title} - {message}")

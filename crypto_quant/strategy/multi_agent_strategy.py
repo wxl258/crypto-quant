@@ -7,9 +7,12 @@ decision fusion. A review agent provides post-trade feedback.
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, Optional
+import logging
+from typing import Any, Dict, Optional
 
 from strategy.base import Strategy, Signal, SignalType
+
+logger = logging.getLogger(__name__)
 
 
 class MultiAgentStrategy(Strategy):
@@ -40,26 +43,26 @@ class MultiAgentStrategy(Strategy):
         }
 
     @classmethod
-    def get_param_info(cls):
+    def get_param_info(cls) -> list[dict[str, Any]]:
         return [
             {'name': 'min_confidence', 'type': 'float', 'default': 0.6,
-             'min': 0.0, 'max': 1.0, 'description': 'Minimum confidence to execute a trade'},
+             'min': 0.0, 'max': 1.0, 'label': '最小置信度'},
             {'name': 'use_orderbook', 'type': 'bool', 'default': False,
-             'description': 'Use order book data for confirmation'},
+             'label': '使用订单簿数据'},
             {'name': 'leverage', 'type': 'int', 'default': 3,
-             'min': 1, 'max': 100, 'description': 'Trading leverage multiplier'},
+             'min': 1, 'max': 100, 'label': '杠杆倍数'},
             {'name': 'tech_weight', 'type': 'float', 'default': 0.5,
-             'min': 0.0, 'max': 1.0, 'description': 'Weight of technical analysis'},
+             'min': 0.0, 'max': 1.0, 'label': '技术分析权重'},
             {'name': 'risk_weight', 'type': 'float', 'default': 0.3,
-             'min': 0.0, 'max': 1.0, 'description': 'Weight of risk assessment'},
+             'min': 0.0, 'max': 1.0, 'label': '风险评估权重'},
             {'name': 'sentiment_weight', 'type': 'float', 'default': 0.2,
-             'min': 0.0, 'max': 1.0, 'description': 'Weight of market sentiment'},
+             'min': 0.0, 'max': 1.0, 'label': '市场情绪权重'},
             {'name': 'atr_period', 'type': 'int', 'default': 14,
-             'min': 5, 'max': 50, 'description': 'ATR period for stop loss calculation'},
+             'min': 5, 'max': 50, 'label': 'ATR计算周期'},
             {'name': 'atr_stop_mult', 'type': 'float', 'default': 2.0,
-             'min': 0.5, 'max': 5.0, 'description': 'ATR multiplier for stop loss'},
+             'min': 0.5, 'max': 5.0, 'label': 'ATR止损倍数'},
             {'name': 'risk_reward_ratio', 'type': 'float', 'default': 2.0,
-             'min': 1.0, 'max': 5.0, 'description': 'Risk/reward ratio for take profit'},
+             'min': 1.0, 'max': 5.0, 'label': '风险收益比'},
         ]
 
     def init(self):
@@ -135,7 +138,8 @@ class MultiAgentStrategy(Strategy):
                 if self.orderbook.fetch():
                     imbalance = self.orderbook.get_imbalance()
                     sentiment_score = (imbalance + 1.0) / 2.0  # map [-1,1] to [0,1]
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Failed to fetch order book data: {e}")
                 pass
 
         # Step 4: Decision fusion

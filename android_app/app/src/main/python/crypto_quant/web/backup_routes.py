@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 import tempfile
 
+from version import __version__
+
 router = APIRouter(prefix="/backup", tags=["backup"])
 
 BACKUP_DIR = Path(__file__).parent.parent / "data" / "backups"
@@ -49,7 +51,7 @@ async def create_backup():
         # 元数据
         meta = {
             "created_at": timestamp,
-            "app_version": "1.0.0",
+            "app_version": __version__,
         }
         zf.writestr("backup_info.json", json.dumps(meta, indent=2))
 

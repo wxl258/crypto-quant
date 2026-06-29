@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#13141d">
+<meta name="description" content="加密货币量化交易系统 - 智能策略驱动，让交易更简单">
+<link rel="manifest" href="/static/manifest.json">
 <title>欢迎 - 量化交易系统</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -241,7 +244,7 @@ body {
 </style>
 </head>
 <body>
-<div class="welcome-container">
+<div class="welcome-container" role="main">
     <div class="slides-wrapper" id="slides-wrapper">
         <!-- Slide 1: Welcome -->
         <div class="slide">
@@ -285,7 +288,17 @@ body {
                     <label>API Secret</label>
                     <input type="password" id="api-secret-input" class="form-input" placeholder="请输入API Secret">
                 </div>
-                <button class="test-btn" id="test-connection-btn" onclick="testConnection()">🔍 测试连接</button>
+                <div class="form-group" id="okx-password-group" style="display:none;">
+                    <label>API 密码 (Passphrase) <span style="color:#f59e0b;font-size:11px;">OKX 必填</span></label>
+                    <input type="password" id="okx-password-input" class="form-input" placeholder="请输入OKX API密码">
+                </div>
+                <div class="form-group" id="testnet-group">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="testnet-checkbox" checked style="accent-color:#4fc3f7;">
+                        <span>使用模拟盘 (Testnet)</span>
+                    </label>
+                </div>
+                <button class="test-btn" id="test-connection-btn" onclick="testConnection()" aria-label="测试交易所连接">🔍 测试连接</button>
                 <div class="test-result" id="test-result"></div>
             </div>
         </div>
@@ -318,14 +331,14 @@ body {
 
     <!-- Bottom controls -->
     <div class="bottom-controls">
-        <div class="dots" id="dots">
+        <div class="dots" id="dots" role="navigation" aria-label="引导页导航">
             <div class="dot active" data-index="0"></div>
             <div class="dot" data-index="1"></div>
             <div class="dot" data-index="2"></div>
         </div>
         <div class="btn-row">
-            <button class="btn-skip" id="skip-btn" onclick="finishOnboarding()">跳过</button>
-            <button class="btn-primary" id="action-btn" onclick="nextSlide()">下一步</button>
+            <button class="btn-skip" id="skip-btn" onclick="finishOnboarding()" aria-label="跳过引导">跳过</button>
+            <button class="btn-primary" id="action-btn" onclick="nextSlide()" aria-label="下一步">下一步</button>
         </div>
     </div>
 </div>
@@ -340,6 +353,19 @@ let isDragging = false;
 const wrapper = document.getElementById('slides-wrapper');
 const dots = document.querySelectorAll('.dot');
 const actionBtn = document.getElementById('action-btn');
+
+// ── 交易所切换时显示/隐藏 OKX 密码字段 ──
+const exchangeSelect = document.getElementById('exchange-select');
+const okxPasswordGroup = document.getElementById('okx-password-group');
+
+function updateExchangeForm() {
+    const isOkx = exchangeSelect.value === 'okx';
+    okxPasswordGroup.style.display = isOkx ? 'block' : 'none';
+}
+
+exchangeSelect.addEventListener('change', updateExchangeForm);
+// 初始化
+updateExchangeForm();
 
 function goToSlide(index) {
     if (index < 0 || index >= totalSlides) return;
@@ -414,11 +440,19 @@ async function testConnection() {
     const exchange = document.getElementById('exchange-select').value;
     const apiKey = document.getElementById('api-key-input').value.trim();
     const apiSecret = document.getElementById('api-secret-input').value.trim();
+    const okxPassword = document.getElementById('okx-password-input').value.trim();
+    const testnet = document.getElementById('testnet-checkbox').checked;
     const resultEl = document.getElementById('test-result');
     const btn = document.getElementById('test-connection-btn');
 
     if (!apiKey || !apiSecret) {
         resultEl.textContent = '请填写 API Key 和 Secret';
+        resultEl.className = 'test-result error';
+        return;
+    }
+
+    if (exchange === 'okx' && !okxPassword) {
+        resultEl.textContent = 'OKX 需要填写 API 密码 (Passphrase)';
         resultEl.className = 'test-result error';
         return;
     }
@@ -436,7 +470,8 @@ async function testConnection() {
                 exchange_id: exchange,
                 api_key: apiKey,
                 api_secret: apiSecret,
-                testnet: true,
+                password: okxPassword || '',
+                testnet: testnet,
             }),
         });
 
@@ -445,6 +480,9 @@ async function testConnection() {
         if (res.ok && data.success) {
             resultEl.textContent = `✅ 连接成功 - ${data.message}`;
             resultEl.className = 'test-result success';
+
+            // 测试成功后自动保存配置
+            await saveExchangeConfig(exchange, apiKey, apiSecret, okxPassword, testnet);
         } else {
             resultEl.textContent = `❌ ${data.detail || '连接失败'}`;
             resultEl.className = 'test-result error';
@@ -455,6 +493,25 @@ async function testConnection() {
     } finally {
         btn.disabled = false;
         btn.textContent = '🔍 测试连接';
+    }
+}
+
+async function saveExchangeConfig(exchange, apiKey, apiSecret, password, testnet) {
+    try {
+        await fetch('/api/exchange/keys', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                exchange_id: exchange,
+                api_key: apiKey,
+                api_secret: apiSecret,
+                password: password || '',
+                testnet: testnet,
+            }),
+        });
+    } catch (e) {
+        // 静默失败，不影响主流程
+        console.warn('保存配置失败:', e);
     }
 }
 </script>

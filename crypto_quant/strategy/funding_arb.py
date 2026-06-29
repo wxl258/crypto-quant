@@ -26,8 +26,12 @@ class FundingRateArbitrageStrategy(Strategy):
             'sl_pct': 0.03,                      # 3% stop loss
         }
 
-    def __init__(self, params: Dict = None):
-        super().__init__(params)
+    def __init__(self, params: Dict = None, **kwargs):
+        if params is None:
+            params = {}
+        if kwargs:
+            params = {**params, **kwargs}
+        super().__init__(params=params)
         self._entry_bar = -1
         self._entry_price = 0.0
 

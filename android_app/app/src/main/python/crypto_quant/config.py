@@ -1,8 +1,11 @@
 """
 Configuration loader — single source of truth for all settings.
-Reads from config.yaml with environment variable overrides.
 
-Environment variables follow the pattern CQ_<SECTION>_<KEY> (uppercase, dot→underscore).
+Reads from config.yaml with environment variable overrides. Supports lazy-loading
+with caching to avoid repeated I/O. Provides convenience accessors for each
+configuration section (exchange, trading, risk, data, backtest, alerts, web).
+
+Environment variables follow the pattern ``CQ_<SECTION>_<KEY>`` (uppercase, dot → underscore).
 Examples:
   CQ_MODE=live                    → overrides config.yaml mode
   CQ_RISK_MAX_POSITION_PCT=0.25   → overrides risk.max_position_pct
@@ -11,13 +14,30 @@ Examples:
 import os
 import yaml
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
-_CONFIG = None
+# ---------------------------------------------------------------------------
+# Module-level cache for the loaded (and env-overridden) configuration dict.
+# Initialised to None; populated on first call to get_config().
+# ---------------------------------------------------------------------------
+_CONFIG: dict[str, Any] | None = None
 
 
-def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Override config values from environment variables (CQ_ prefix)."""
+def _apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
+    """Override config values from environment variables (``CQ_`` prefix).
+
+    Keys are parsed as ``CQ_<section>_<field>`` (case-insensitive for the
+    section/field portion).  Values are type-coerced when possible:
+    ``"true"``/``"false"`` → bool, digits → int, numeric → float,
+    otherwise kept as str.
+
+    Args:
+        config: The configuration dictionary loaded from YAML or defaults.
+
+    Returns:
+        The same dictionary, mutated in-place with any matching environment
+        variable overrides applied.
+    """
     for key, value in os.environ.items():
         if not key.startswith("CQ_"):
             continue
@@ -26,7 +46,7 @@ def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
             continue
         section, field = parts
         if section in config and isinstance(config[section], dict):
-            env_val = value
+            env_val: bool | int | float | str = value
             # Try type coercion: bool, int, float, else keep as str
             if env_val.lower() in ("true", "false"):
                 env_val = env_val.lower() == "true"
@@ -41,13 +61,22 @@ def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def _load_config() -> Dict[str, Any]:
-    config_path = Path(__file__).parent / "config.yaml"
+def _load_config() -> dict[str, Any]:
+    """Load the full configuration from ``config.yaml`` and apply env overrides.
+
+    If the YAML file cannot be read (missing, unparseable, etc.) a built-in
+    set of default configuration values is used instead so the application can
+    still start in degraded / paper-trading mode.
+
+    Returns:
+        The fully resolved configuration dictionary.
+    """
+    config_path: Path = Path(__file__).parent / "config.yaml"
 
     # 尝试加载 YAML 配置文件
     try:
         with open(config_path, "r", encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+            config: dict[str, Any] = yaml.safe_load(f)
     except (FileNotFoundError, IOError, yaml.YAMLError) as e:
         # Android 环境或文件缺失时的 fallback：使用内嵌默认配置
         import logging
@@ -102,8 +131,15 @@ def _load_config() -> Dict[str, Any]:
     return _apply_env_overrides(config)
 
 
-def get_config() -> Dict[str, Any]:
-    """Return the full configuration dictionary (lazy-loaded, cached)."""
+def get_config() -> dict[str, Any]:
+    """Return the full configuration dictionary (lazy-loaded, cached).
+
+    The configuration is loaded from disk only once; subsequent calls return
+    the cached dictionary.
+
+    Returns:
+        The complete configuration dictionary with all sections.
+    """
     global _CONFIG
     if _CONFIG is None:
         _CONFIG = _load_config()
@@ -113,76 +149,98 @@ def get_config() -> Dict[str, Any]:
 # ── Convenience accessors ──
 
 def get_mode() -> str:
+    """Return the current operation mode (e.g. ``"paper"``, ``"live"``)."""
     return get_config().get("mode", "paper")
 
 
 def get_exchange_id() -> str:
+    """Return the configured exchange identifier, lowercased."""
     return get_exchange_config().get("id", "binance").lower()
 
 
-def get_okx_config() -> Dict[str, Any]:
+def get_okx_config() -> dict[str, Any]:
+    """Return the OKX exchange configuration section."""
     return get_config().get("okx", {})
 
 
-def get_binance_config() -> Dict[str, Any]:
+def get_binance_config() -> dict[str, Any]:
+    """Return the Binance exchange configuration section."""
     return get_config().get("binance", {})
 
 
-def get_exchange_config() -> Dict[str, Any]:
+def get_exchange_config() -> dict[str, Any]:
+    """Return the exchange configuration section."""
     return get_config().get("exchange", {})
 
 
-def get_trading_config() -> Dict[str, Any]:
+def get_trading_config() -> dict[str, Any]:
+    """Return the trading configuration section."""
     return get_config().get("trading", {})
 
 
-def get_risk_config() -> Dict[str, Any]:
+def get_risk_config() -> dict[str, Any]:
+    """Return the risk management configuration section."""
     return get_config().get("risk", {})
 
 
-def get_data_config() -> Dict[str, Any]:
+def get_data_config() -> dict[str, Any]:
+    """Return the data storage configuration section."""
     return get_config().get("data", {})
 
 
-def get_backtest_config() -> Dict[str, Any]:
+def get_backtest_config() -> dict[str, Any]:
+    """Return the backtest configuration section."""
     return get_config().get("backtest", {})
 
 
-def get_web_config() -> Dict[str, Any]:
+def get_web_config() -> dict[str, Any]:
+    """Return the web server configuration section."""
     return get_config().get("web", {})
 
 
-def get_alerts_config() -> Dict[str, Any]:
+def get_alerts_config() -> dict[str, Any]:
+    """Return the alerts/notifications configuration section."""
     return get_config().get("alerts", {})
 
 
 def get_timezone() -> str:
-    """Return the configured timezone, defaulting to Asia/Shanghai."""
+    """Return the configured timezone, defaulting to ``"Asia/Shanghai"``."""
     return get_trading_config().get("timezone", "Asia/Shanghai")
 
 
 def get_db_path() -> str:
-    raw = get_data_config().get("db_path", "data/market.db")
+    """Return the absolute path to the market database.
+
+    Resolves relative paths to an absolute location, with fallback logic for
+    Android environments (Chaquopy) where the standard filesystem layout may
+    not be available.
+
+    Returns:
+        Absolute filesystem path to the SQLite database file.
+    """
+    raw: str = get_data_config().get("db_path", "data/market.db")
     if not os.path.isabs(raw):
         # Android: use app private storage directory
         try:
             from android.storage import app_storage_path
-            base = app_storage_path()
-            result = os.path.join(base, raw)
+            base: str = app_storage_path()
+            result: str = os.path.join(base, raw)
             os.makedirs(os.path.dirname(result), exist_ok=True)
             return result
         except (ImportError, Exception):
             # Use HOME directory (Chaquopy standard on Android)
-            home = os.environ.get("HOME", str(Path(__file__).parent))
+            home: str = os.environ.get("HOME", str(Path(__file__).parent))
             # 简化路径，直接用 market.db
             result = os.path.join(home, "market.db")
             return result
     return raw
 
 
-def get_trading_symbols() -> List[str]:
+def get_trading_symbols() -> list[str]:
+    """Return the list of trading symbols (e.g. ``["BTCUSDT", "ETHUSDT"]``)."""
     return get_trading_config().get("symbols", ["BTCUSDT", "ETHUSDT"])
 
 
-def get_kline_intervals() -> List[str]:
+def get_kline_intervals() -> list[str]:
+    """Return the configured kline/candlestick intervals."""
     return get_data_config().get("kline_intervals", ["1m", "5m", "15m", "1h", "4h", "1d"])

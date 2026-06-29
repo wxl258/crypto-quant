@@ -159,7 +159,12 @@ class BayesianOptimizer:
         return params
 
     def _gp_predict(self, X_train, y_train, X_test):
-        """Simple GP prediction using RBF kernel."""
+        """GP prediction using RBF kernel with Cholesky or solve.
+
+        Uses scipy.linalg.cho_solve when available, falls back to
+        np.linalg.solve (faster and more stable than inv). If the
+        kernel matrix is singular, falls back to simple mean/std.
+        """
         if len(X_train) == 0:
             return np.zeros(len(X_test)), np.ones(len(X_test)) * 10
 
@@ -179,18 +184,46 @@ class BayesianOptimizer:
         y_mean = np.mean(y_train)
         y_centered = y_train - y_mean
 
+        # Try Cholesky decomposition first (scipy), then solve, then fallback
+        alpha = None  # K^{-1} @ y_centered
+        use_cholesky = False
+
         try:
-            K_inv = np.linalg.inv(K)
-        except np.linalg.LinAlgError:
-            K_inv = np.linalg.pinv(K)
+            from scipy.linalg import cho_factor, cho_solve
+            c, low = cho_factor(K)
+            alpha = cho_solve((c, low), y_centered)
+            use_cholesky = True
+        except Exception:
+            pass
+
+        if alpha is None:
+            try:
+                alpha = np.linalg.solve(K, y_centered)
+            except np.linalg.LinAlgError:
+                # Singular matrix — fall back to simple average
+                mu_fallback = np.full(n_test, y_mean)
+                sigma_fallback = np.full(n_test, np.std(y_train) if len(y_train) > 1 else 1.0)
+                return mu_fallback, sigma_fallback
 
         mu = np.zeros(n_test)
         sigma = np.zeros(n_test)
 
         for i in range(n_test):
             k_star = np.array([rbf(X_test[i], X_train[j]) for j in range(n_train)])
-            mu[i] = y_mean + k_star @ K_inv @ y_centered
-            sigma[i] = np.sqrt(max(0, 1.0 - k_star @ K_inv @ k_star))
+
+            if use_cholesky:
+                # For Cholesky: sigma^2 = k(x,x) - k_star^T K^{-1} k_star
+                # K^{-1} k_star = cho_solve(c, k_star)
+                try:
+                    c, low = cho_factor(K)
+                    Kinv_kstar = cho_solve((c, low), k_star)
+                except Exception:
+                    Kinv_kstar = np.linalg.solve(K, k_star)
+            else:
+                Kinv_kstar = np.linalg.solve(K, k_star)
+
+            mu[i] = y_mean + k_star @ alpha
+            sigma[i] = np.sqrt(max(0, 1.0 - k_star @ Kinv_kstar))
 
         return mu, sigma
 

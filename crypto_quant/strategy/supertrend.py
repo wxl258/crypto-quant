@@ -26,6 +26,15 @@ from typing import Dict, List
 import numpy as np
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_ADAPTIVE_ATR_PERIOD = 14
+_ADAPTIVE_MIN_LENGTH = 50
+_ADAPTIVE_HIGH_VOL_RATIO = 1.5
+_ADAPTIVE_HIGH_VOL_FACTOR = 1.3
+_ADAPTIVE_LOW_VOL_RATIO = 0.7
+_ADAPTIVE_LOW_VOL_FACTOR = 0.8
+_NO_TRADE_BAR_SENTINEL = -999
+
 
 class SuperTrendStrategy(Strategy):
     """Multi-timeframe SuperTrend with dual confirmation and volatility-adaptive multiplier."""
@@ -116,7 +125,7 @@ class SuperTrendStrategy(Strategy):
         return trend, st_line
 
     def init(self):
-        self._last_trade_bar = -999
+        self._last_trade_bar = _NO_TRADE_BAR_SENTINEL
         high = self.data['high'].values
         low = self.data['low'].values
         close = self.data['close'].values
@@ -129,10 +138,10 @@ class SuperTrendStrategy(Strategy):
         use_adaptive = self.get_param('use_adaptive_mult', True)
         adaptive_factors = None
 
-        if use_adaptive and len(close) > 50:
+        if use_adaptive and len(close) > _ADAPTIVE_MIN_LENGTH:
             atr_avg_period = self.get_param('atr_avg_period', 50)
             # Compute ATR and its SMA for volatility ratio
-            atr_full = self.atr(high, low, close, 14)
+            atr_full = self.atr(high, low, close, _ADAPTIVE_ATR_PERIOD)
             atr_sma = self.sma(atr_full, atr_avg_period)
 
             adaptive_factors = np.ones(len(close), dtype=float)
@@ -141,10 +150,10 @@ class SuperTrendStrategy(Strategy):
                     adaptive_factors[i] = 1.0
                 else:
                     ratio = atr_full[i] / atr_sma[i]
-                    if ratio > 1.5:
-                        adaptive_factors[i] = 1.3  # Wider bands in high vol
-                    elif ratio < 0.7:
-                        adaptive_factors[i] = 0.8  # Tighter bands in low vol
+                    if ratio > _ADAPTIVE_HIGH_VOL_RATIO:
+                        adaptive_factors[i] = _ADAPTIVE_HIGH_VOL_FACTOR  # Wider bands in high vol
+                    elif ratio < _ADAPTIVE_LOW_VOL_RATIO:
+                        adaptive_factors[i] = _ADAPTIVE_LOW_VOL_FACTOR  # Tighter bands in low vol
                     else:
                         adaptive_factors[i] = 1.0
 
@@ -156,12 +165,12 @@ class SuperTrendStrategy(Strategy):
             high, low, close, slow_atr_p, slow_mult, adaptive_factors
         )
 
-        self.add_indicator('fast_trend', fast_trend.astype(float))
+        self.add_indicator('fast_trend', fast_trend.astype(int))
         self.add_indicator('fast_st', fast_st)
-        self.add_indicator('slow_trend', slow_trend.astype(float))
+        self.add_indicator('slow_trend', slow_trend.astype(int))
         self.add_indicator('slow_st', slow_st)
 
-        self._last_trade_bar = -999
+        self._last_trade_bar = _NO_TRADE_BAR_SENTINEL
 
     def next(self, i: int) -> Signal:
         fast_trend = self._indicators['fast_trend']

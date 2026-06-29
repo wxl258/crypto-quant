@@ -25,6 +25,14 @@ import numpy as np
 import pandas as pd
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_ADX_SCALE = 100.0
+_DIVISION_EPSILON = 1e-10
+_EMA_TRENDING_ATR_DISTANCE = 2.0
+_EMA_SLOPE_LOOKBACK = 10
+_EMA_SLOPE_THRESHOLD = 0.03
+_TRENDING_SIGNALS_MIN = 2
+
 
 class GridStrategy(Strategy):
     """Grid Trading — Trend-aware, ATR-spaced grid with per-layer stop-loss.
@@ -63,7 +71,7 @@ class GridStrategy(Strategy):
             {"name": "trend_filter_adx", "type": "int", "default": 25, "min": 10, "max": 50, "label": "趋势过滤ADX阈值"},
             {"name": "trend_lookback", "type": "int", "default": 50, "min": 20, "max": 200, "label": "趋势回溯K线"},
             {"name": "ema_period", "type": "int", "default": 50, "min": 20, "max": 200, "label": "EMA周期"},
-            {"name": "atr_stop_mult", "type": "float", "default": 3.0, "min": 1.0, "max": 6.0, "step": 0.5, "label": "ATR止损倍数"},
+            {"name": "atr_stop_mult", "type": "float", "default": 1.5, "min": 1.0, "max": 6.0, "step": 0.5, "label": "ATR止损倍数"},
         ]
 
     def init(self):
@@ -111,7 +119,7 @@ class GridStrategy(Strategy):
 
         # ADX proxy: (ATR / price_range) * 100, scaled
         with np.errstate(divide='ignore', invalid='ignore'):
-            adx = np.where(price_range > 0, (atr / price_range) * 100.0, 0.0)
+            adx = np.where(price_range > 0, (atr / price_range) * _ADX_SCALE, 0.0)
 
         # Smooth with EMA
         result = np.full(len(close), np.nan, dtype=float)
@@ -155,19 +163,19 @@ class GridStrategy(Strategy):
 
         # Check 2: Price far from EMA
         # "Far" = more than 2 ATR away from EMA (sustained directional move)
-        distance_atr = abs(price - ema[i]) / max(atr[i], 1e-10)
-        ema_trending = distance_atr > 2.0
+        distance_atr = abs(price - ema[i]) / max(atr[i], _DIVISION_EPSILON)
+        ema_trending = distance_atr > _EMA_TRENDING_ATR_DISTANCE
 
         # Check 3: EMA slope (rising or falling steadily)
-        if i >= 10 and not np.isnan(ema[i]) and not np.isnan(ema[i-10]):
-            ema_slope = (ema[i] - ema[i-10]) / max(abs(ema[i-10]), 1e-10)
-            slope_trending = abs(ema_slope) > 0.03  # 3% over 10 bars
+        if i >= _EMA_SLOPE_LOOKBACK and not np.isnan(ema[i]) and not np.isnan(ema[i - _EMA_SLOPE_LOOKBACK]):
+            ema_slope = (ema[i] - ema[i - _EMA_SLOPE_LOOKBACK]) / max(abs(ema[i - _EMA_SLOPE_LOOKBACK]), _DIVISION_EPSILON)
+            slope_trending = abs(ema_slope) > _EMA_SLOPE_THRESHOLD  # 3% over 10 bars
         else:
             slope_trending = False
 
         # Trending if at least 2 of 3 signals agree
         signals = [adx_trending, ema_trending, slope_trending]
-        return sum(signals) >= 2
+        return sum(signals) >= _TRENDING_SIGNALS_MIN
 
     def _recalculate_grid(self, i: int) -> None:
         """Recalculate grid levels centered on current price with ATR spacing."""

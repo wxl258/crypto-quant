@@ -129,3 +129,61 @@ async def switch_exchange(req: ExchangeSwitchRequest):
         "active": req.exchange_id,
         "message": f"已切换到 {req.exchange_id}，请重启交易机器人使配置生效",
     }
+
+
+# ── 保存 API Key ──
+
+@router.post("/keys")
+async def save_api_keys(req: ExchangeKeyRequest):
+    """保存交易所 API Key 到配置（运行时生效，不持久化到文件）"""
+    if req.exchange_id not in SUPPORTED_EXCHANGES:
+        raise HTTPException(
+            400,
+            f"不支持的交易所: {req.exchange_id}。支持: {SUPPORTED_EXCHANGES}"
+        )
+
+    config = get_config()
+    section = req.exchange_id.lower()
+
+    if section not in config:
+        config[section] = {}
+
+    config[section]["api_key"] = req.api_key
+    config[section]["api_secret"] = req.api_secret
+    if req.password:
+        config[section]["password"] = req.password
+    config[section]["testnet"] = req.testnet
+
+    return {
+        "success": True,
+        "exchange": req.exchange_id,
+        "message": f"{req.exchange_id} API Key 已保存（运行时生效）",
+    }
+
+
+# ── 获取交易所 API 配置（脱敏） ──
+
+@router.get("/config")
+async def get_exchange_api_config():
+    """获取当前活跃交易所的 API 配置（Secret 脱敏显示）"""
+    ex_id = get_exchange_id()
+    if ex_id == 'okx':
+        cfg = get_okx_config()
+    else:
+        cfg = get_binance_config()
+
+    def mask(s: str) -> str:
+        if not s:
+            return ""
+        if len(s) <= 8:
+            return "*" * len(s)
+        return s[:4] + "*" * (len(s) - 8) + s[-4:]
+
+    return {
+        "exchange_id": ex_id,
+        "api_key": mask(cfg.get("api_key", "")),
+        "api_secret": mask(cfg.get("api_secret", "")),
+        "password": mask(cfg.get("password", "")),
+        "testnet": cfg.get("testnet", True),
+        "configured": bool(cfg.get("api_key")),
+    }

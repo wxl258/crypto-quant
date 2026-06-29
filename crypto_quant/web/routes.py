@@ -1,20 +1,32 @@
 """
 Web API Routes — FastAPI endpoints for the trading system
 """
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from fastapi.responses import StreamingResponse, JSONResponse
+from pydantic import BaseModel, Field
+
+# 兼容 Pydantic v1 和 v2
+try:
+    from pydantic import field_validator
+except ImportError:
+    # Pydantic v1 fallback
+    from pydantic import validator as field_validator
 from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import logging
-import json
+try:
+    import orjson as _json_module
+    _JSON_AVAILABLE = True
+except ImportError:
+    import json as _json_module
+    _JSON_AVAILABLE = False
 import os
 import io
 import itertools
-from fpdf import FPDF
-
 from config import (
     get_db_path, get_trading_symbols, get_trading_config,
     get_risk_config, get_backtest_config, get_mode, get_binance_config,
@@ -49,7 +61,7 @@ class BacktestRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_backtest(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")
@@ -63,7 +75,7 @@ class TradeRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_trade(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")
@@ -75,7 +87,7 @@ class CloseTradeRequest(BaseModel):
 
     @field_validator('symbol')
     @classmethod
-    def validate_symbol(cls, v):
+    def validate_symbol_close(cls, v):
         allowed = get_trading_symbols()
         if v not in allowed:
             raise ValueError(f"symbol must be one of {allowed}")
@@ -113,6 +125,7 @@ class StartTraderRequest(BaseModel):
 
 class OptimizeRequest(BacktestRequest):
     param_grid: dict = {}
+    optimize_mode: Literal["grid", "random"] = "grid"
 
 # ── Global state (in production, use proper dependency injection) ──
 _data_store = None
@@ -296,15 +309,24 @@ async def get_klines(
     if df is None or df.empty:
         return _generate_sample_klines(limit)
 
-    df = df.reset_index()
-    df['timestamp'] = df['timestamp'].astype(int) // 10**6
-    return df.to_dict('records')
+    # Ensure timestamp column exists (store uses 'open_time')
+    if 'open_time' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['open_time']).astype('int64') // 10**6
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = df['timestamp'].astype(int) // 10**6
+    else:
+        return _generate_sample_klines(limit)
+
+    return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].to_dict('records')
 
 
 @router.get("/market/symbols")
 async def get_symbols():
     """Get available trading symbols"""
-    return {"symbols": _parse_symbols()}
+    return JSONResponse(
+        content={"symbols": _parse_symbols()},
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 # ============================================================
@@ -334,12 +356,15 @@ async def get_exchange_info():
     if not available_symbols:
         available_symbols = get_trading_symbols()
 
-    return {
-        "exchange_id": exchange_id,
-        "testnet": exchange_cfg.get("testnet", True),
-        "available_symbols": available_symbols[:50],
-        "total_symbols": len(available_symbols),
-    }
+    return JSONResponse(
+        content={
+            "exchange_id": exchange_id,
+            "testnet": exchange_cfg.get("testnet", True),
+            "available_symbols": available_symbols[:50],
+            "total_symbols": len(available_symbols),
+        },
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # ============================================================
@@ -349,7 +374,10 @@ async def get_exchange_info():
 @router.get("/strategies")
 async def list_strategies():
     """List all registered strategies"""
-    return {'strategies': StrategyRegistry.list_strategies()}
+    return JSONResponse(
+        content={'strategies': StrategyRegistry.list_strategies()},
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 @router.get("/strategies/{name}")
@@ -417,24 +445,42 @@ async def run_backtest_compare(request: BacktestRequest):
         default_leverage=trading_cfg.get('default_leverage', 3),
     )
 
-    results = []
-    for s in StrategyRegistry.list_strategies():
+    def _run_single_backtest(strat_name, strat_cls, strat_df, strat_symbol):
         try:
-            cls = StrategyRegistry.get(s['name'])
-            strat = cls()
-            strat.params['leverage'] = trading_cfg.get('default_leverage', 3)
-            result = engine.run(strat, df, symbol)
-            results.append({
-                'name': s['name'],
+            strat = strat_cls(leverage=trading_cfg.get('default_leverage', 3))
+            result = engine.run(strat, strat_df, strat_symbol)
+            return {
+                'name': strat_name,
                 'trades': result['metrics']['total_trades'],
                 'win_rate': result['metrics']['win_rate'],
                 'total_return': result['metrics']['total_return'],
                 'sharpe_ratio': result['metrics']['sharpe_ratio'],
                 'max_drawdown': result['metrics']['max_drawdown'],
                 'profit_factor': result['metrics']['profit_factor'],
-            })
+            }
         except Exception as e:
-            results.append({'name': s['name'], 'error': str(e)[:80]})
+            return {'name': strat_name, 'error': str(e)[:80]}
+
+    sem = asyncio.Semaphore(4)
+
+    async def run_with_limit(s_info):
+        async with sem:
+            s_name = s_info['name']
+            s_cls = StrategyRegistry.get(s_name)
+            return await asyncio.to_thread(
+                _run_single_backtest, s_name, s_cls, df, symbol
+            )
+
+    try:
+        strategies = StrategyRegistry.list_strategies()
+        results = await asyncio.wait_for(
+            asyncio.gather(*[run_with_limit(s) for s in strategies], return_exceptions=True),
+            timeout=120.0,
+        )
+        # Filter out exceptions that propagated (shouldn't happen due to try/except inside)
+        results = [r if not isinstance(r, Exception) else {'name': 'unknown', 'error': str(r)[:80]} for r in results]
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Backtest compare timed out after 120 seconds — try reducing date range or candle count")
 
     return {
         'symbol': symbol, 'interval': interval,
@@ -446,7 +492,11 @@ async def run_backtest_compare(request: BacktestRequest):
 
 @router.post("/backtest/optimize")
 async def run_backtest_optimize(request: OptimizeRequest):
-    """Run parameter optimization: tries all combinations in param_grid."""
+    """Run parameter optimization: grid search or random search.
+
+    When total combinations exceed 50, grid mode automatically degrades to
+    random sampling of 50 combinations to avoid excessive computation.
+    """
     param_grid = request.param_grid
     if not param_grid:
         raise HTTPException(400, "param_grid is required")
@@ -454,10 +504,24 @@ async def run_backtest_optimize(request: OptimizeRequest):
     # Generate all combinations
     keys = list(param_grid.keys())
     values = list(param_grid.values())
-    combinations = list(itertools.product(*values))
+    all_combinations = list(itertools.product(*values))
+    optimize_mode = request.optimize_mode
+    sampled_indices = None  # track which combos were sampled in random mode
 
-    if len(combinations) > 50:
-        raise HTTPException(400, f"Too many combinations: {len(combinations)} (max 50)")
+    if optimize_mode == "random" or len(all_combinations) > 50:
+        # Random search: sample 50 combinations (or all if fewer)
+        sample_size = min(50, len(all_combinations))
+        rng = np.random.default_rng()
+        if sample_size < len(all_combinations):
+            sampled_indices = sorted(rng.choice(len(all_combinations), size=sample_size, replace=False).tolist())
+            combinations = [all_combinations[i] for i in sampled_indices]
+        else:
+            combinations = all_combinations
+            sampled_indices = list(range(len(all_combinations)))
+        if optimize_mode == "grid" and len(all_combinations) > 50:
+            optimize_mode = "random"  # auto-degrade
+    else:
+        combinations = all_combinations
 
     strategy_name = request.strategy
     strategy_cls = StrategyRegistry.get(strategy_name)
@@ -494,26 +558,36 @@ async def run_backtest_optimize(request: OptimizeRequest):
         default_leverage=trading_cfg.get('default_leverage', 3),
     )
 
-    results = []
-    for combo in combinations:
-        params = dict(zip(keys, combo))
-        if 'leverage' not in params:
-            params['leverage'] = trading_cfg.get('default_leverage', 3)
-        try:
-            strategy = strategy_cls(params)
-            result = engine.run(strategy, df, symbol)
-            results.append({
-                'params': params,
-                'sharpe_ratio': result['metrics']['sharpe_ratio'],
-                'total_return': result['metrics']['total_return'],
-                'max_drawdown': result['metrics']['max_drawdown'],
-                'win_rate': result['metrics']['win_rate'],
-                'profit_factor': result['metrics']['profit_factor'],
-                'total_trades': result['metrics']['total_trades'],
-                'final_capital': result['final_capital'],
-            })
-        except Exception as e:
-            results.append({'params': params, 'error': str(e)[:80]})
+    def _run_optimize_loop():
+        results = []
+        for idx, combo in enumerate(combinations):
+            params = dict(zip(keys, combo))
+            if 'leverage' not in params:
+                params['leverage'] = trading_cfg.get('default_leverage', 3)
+            try:
+                strategy = strategy_cls(params)
+                result = engine.run(strategy, df, symbol)
+                results.append({
+                    'params': params,
+                    'sharpe_ratio': result['metrics']['sharpe_ratio'],
+                    'total_return': result['metrics']['total_return'],
+                    'max_drawdown': result['metrics']['max_drawdown'],
+                    'win_rate': result['metrics']['win_rate'],
+                    'profit_factor': result['metrics']['profit_factor'],
+                    'total_trades': result['metrics']['total_trades'],
+                    'final_capital': result['final_capital'],
+                })
+            except Exception as e:
+                results.append({'params': params, 'error': str(e)[:80]})
+        return results
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.to_thread(_run_optimize_loop),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Backtest optimize timed out after 120 seconds — try reducing date range or parameter combinations")
 
     # Sort by sharpe_ratio descending, valid results first
     valid = [r for r in results if 'error' not in r]
@@ -521,20 +595,30 @@ async def run_backtest_optimize(request: OptimizeRequest):
     valid.sort(key=lambda r: r['sharpe_ratio'] or -999, reverse=True)
     top10 = valid[:10]
 
-    return {
+    response = {
         'strategy': strategy_name,
         'symbol': symbol,
         'interval': interval,
-        'total_combinations': len(combinations),
+        'optimize_mode': optimize_mode,
+        'total_combinations': len(all_combinations),
+        'evaluated_combinations': len(combinations),
         'best_params': top10[0]['params'] if top10 else None,
         'best_sharpe': top10[0]['sharpe_ratio'] if top10 else None,
         'top10': top10,
         'errors': errors,
     }
 
+    if sampled_indices is not None:
+        response['sampled_indices'] = sampled_indices
+
+    return response
+
 
 @router.post("/backtest")
-async def run_backtest(request: BacktestRequest):
+async def run_backtest(
+    request: BacktestRequest,
+    downsample: int = Query(default=0, ge=0, description="Downsample equity_curve: keep every Nth point, 0=no downsampling"),
+):
     """Run a backtest"""
     bt_cfg = get_backtest_config()
     trading_cfg = get_trading_config()
@@ -595,7 +679,14 @@ async def run_backtest(request: BacktestRequest):
         default_leverage=trading_cfg.get('default_leverage', 3),
     )
     strategy = strategy_cls(params)
-    result = engine.run(strategy, df, symbol)
+    # Run backtest with timeout protection (120s default)
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(engine.run, strategy, df, symbol),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Backtest timed out after 120 seconds — try reducing date range or candle count")
 
     # Format equity curve for chart
     equity = result['equity_curve'].reset_index()
@@ -615,13 +706,18 @@ async def run_backtest(request: BacktestRequest):
                 'pnl_pct': float(t.get('pnl_pct', 0)),
             })
 
+    # Downsample equity curve if requested
+    equity_records = equity.to_dict('records')
+    if downsample > 1:
+        equity_records = equity_records[::downsample]
+
     return {
         'strategy': strategy_name,
         'symbol': symbol,
         'interval': interval,
         'params': params,
         'metrics': result['metrics'],
-        'equity_curve': equity.to_dict('records'),
+        'equity_curve': equity_records,
         'trades': trades_list,
         'initial_capital': initial_capital,
         'final_capital': result['final_capital'],
@@ -635,7 +731,7 @@ async def run_backtest(request: BacktestRequest):
 # Backtest Export Endpoints
 # ============================================================
 
-def _run_backtest_for_export(request: BacktestRequest):
+async def _run_backtest_for_export(request: BacktestRequest):
     """Shared backtest runner for export endpoints."""
     bt_cfg = get_backtest_config()
     trading_cfg = get_trading_config()
@@ -689,7 +785,14 @@ def _run_backtest_for_export(request: BacktestRequest):
         default_leverage=trading_cfg.get('default_leverage', 3),
     )
     strategy = strategy_cls(params)
-    result = engine.run(strategy, df, symbol)
+    # Run backtest with timeout protection (120s default)
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(engine.run, strategy, df, symbol),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Backtest export timed out after 120 seconds — try reducing date range or candle count")
     result['date_start'] = actual_start
     result['date_end'] = actual_end
     result['params'] = params
@@ -700,7 +803,7 @@ def _run_backtest_for_export(request: BacktestRequest):
 @router.post("/backtest/export")
 async def export_backtest_csv(request: BacktestRequest):
     """Run backtest and return trades as a CSV download."""
-    result = _run_backtest_for_export(request)
+    result = await _run_backtest_for_export(request)
 
     output = io.StringIO()
     output.write("entry_time,exit_time,side,entry_price,exit_price,pnl,pnl_pct,return_cumulative\n")
@@ -734,111 +837,117 @@ async def export_backtest_csv(request: BacktestRequest):
 @router.post("/backtest/export/pdf")
 async def export_backtest_pdf(request: BacktestRequest):
     """Run backtest and return a PDF report."""
-    result = _run_backtest_for_export(request)
+    result = await _run_backtest_for_export(request)
     m = result['metrics']
-
-    pdf = FPDF()
-    pdf.add_page()
-
-    # Title
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, f"Backtest Report: {request.symbol} / {request.strategy}", ln=True, align="C")
-    pdf.ln(4)
-
-    # Date range and config
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"Date Range: {result['date_start']}  to  {result['date_end']}", ln=True)
-    pdf.cell(0, 6, f"Interval: {request.interval}    Strategy: {request.strategy}    Symbol: {request.symbol}", ln=True)
-    pdf.ln(6)
-
-    # Metrics table
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Performance Metrics", ln=True)
-    pdf.ln(2)
-
-    metrics_rows = [
-        ("Total Return", f"{m.get('total_return', 0):.2f}%"),
-        ("Annual Return", f"{m.get('annual_return', 0):.2f}%"),
-        ("Sharpe Ratio", f"{m.get('sharpe_ratio', 0):.2f}"),
-        ("Win Rate", f"{m.get('win_rate', 0):.2f}%"),
-        ("Max Drawdown", f"{m.get('max_drawdown', 0):.2f}%"),
-        ("Total Trades", str(m.get('total_trades', 0))),
-        ("Profit Factor", f"{m.get('profit_factor', 0):.2f}"),
-        ("Calmar Ratio", f"{m.get('calmar_ratio', 0):.2f}"),
-    ]
-
-    pdf.set_font("Helvetica", "", 10)
-    col_w = 50
-    for label, value in metrics_rows:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(col_w, 7, label, border=1)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(col_w, 7, value, border=1)
-        pdf.ln()
-
-    pdf.ln(6)
-
-    # Equity curve (ASCII style)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Equity Curve (ASCII)", ln=True)
-    pdf.ln(2)
-
     equity = result['equity_curve']
-    if len(equity) > 0:
-        eq_values = equity['equity'].values
-        eq_min, eq_max = eq_values.min(), eq_values.max()
-        chart_width = 80
-        chart_height = 15
+    trades = result['trades']
 
-        pdf.set_font("Courier", "", 7)
-        step = max(1, len(eq_values) // chart_width)
-        for row in range(chart_height, -1, -1):
-            line = ""
-            for i in range(0, len(eq_values), step):
-                if eq_max == eq_min:
-                    val = chart_height // 2
-                else:
-                    val = int((eq_values[i] - eq_min) / (eq_max - eq_min) * chart_height)
-                line += "#" if val >= row else " "
-            pdf.cell(0, 4, line, ln=True)
+    def _generate_pdf():
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
 
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(0, 5, f"Min: ${eq_min:,.0f}    Max: ${eq_max:,.0f}", ln=True)
+        # Title
+        pdf.set_font("Helvetica", "B", 16)
+        pdf.cell(0, 10, f"Backtest Report: {request.symbol} / {request.strategy}", ln=True, align="C")
+        pdf.ln(4)
 
-    pdf.ln(6)
+        # Date range and config
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 6, f"Date Range: {result['date_start']}  to  {result['date_end']}", ln=True)
+        pdf.cell(0, 6, f"Interval: {request.interval}    Strategy: {request.strategy}    Symbol: {request.symbol}", ln=True)
+        pdf.ln(6)
 
-    # Trade summary
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Trade List", ln=True)
-    pdf.ln(2)
+        # Metrics table
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Performance Metrics", ln=True)
+        pdf.ln(2)
 
-    if not result['trades'].empty:
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(32, 6, "Entry", border=1)
-        pdf.cell(32, 6, "Exit", border=1)
-        pdf.cell(14, 6, "Side", border=1)
-        pdf.cell(22, 6, "Entry $", border=1)
-        pdf.cell(22, 6, "Exit $", border=1)
-        pdf.cell(22, 6, "PnL", border=1)
-        pdf.cell(22, 6, "PnL %", border=1)
-        pdf.ln()
+        metrics_rows = [
+            ("Total Return", f"{m.get('total_return', 0):.2f}%"),
+            ("Annual Return", f"{m.get('annual_return', 0):.2f}%"),
+            ("Sharpe Ratio", f"{m.get('sharpe_ratio', 0):.2f}"),
+            ("Win Rate", f"{m.get('win_rate', 0):.2f}%"),
+            ("Max Drawdown", f"{m.get('max_drawdown', 0):.2f}%"),
+            ("Total Trades", str(m.get('total_trades', 0))),
+            ("Profit Factor", f"{m.get('profit_factor', 0):.2f}"),
+            ("Calmar Ratio", f"{m.get('calmar_ratio', 0):.2f}"),
+        ]
 
-        pdf.set_font("Helvetica", "", 8)
-        for _, t in result['trades'].iterrows():
-            entry_str = str(t.get('entry_time', ''))[:10]
-            exit_str = str(t.get('exit_time', ''))[:10]
-            pdf.cell(32, 5, entry_str, border=1)
-            pdf.cell(32, 5, exit_str, border=1)
-            pdf.cell(14, 5, str(t.get('side', '')), border=1)
-            pdf.cell(22, 5, f"{t.get('entry_price', 0):.2f}", border=1)
-            pdf.cell(22, 5, f"{t.get('exit_price', 0):.2f}", border=1)
-            pdf.cell(22, 5, f"{t.get('pnl', 0):.2f}", border=1)
-            pdf.cell(22, 5, f"{t.get('pnl_pct', 0):.2f}%", border=1)
+        pdf.set_font("Helvetica", "", 10)
+        col_w = 50
+        for label, value in metrics_rows:
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(col_w, 7, label, border=1)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.cell(col_w, 7, value, border=1)
             pdf.ln()
 
-    pdf_content = pdf.output()
-    date_str = datetime.now().strftime("%Y%m%d")
-    filename = f"backtest_{request.symbol}_{request.strategy}_{date_str}.pdf"
+        pdf.ln(6)
+
+        # Equity curve (ASCII style)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Equity Curve (ASCII)", ln=True)
+        pdf.ln(2)
+
+        if len(equity) > 0:
+            eq_values = equity['equity'].values
+            eq_min, eq_max = eq_values.min(), eq_values.max()
+            chart_width = 80
+            chart_height = 15
+
+            pdf.set_font("Courier", "", 7)
+            step = max(1, len(eq_values) // chart_width)
+            for row in range(chart_height, -1, -1):
+                line = ""
+                for i in range(0, len(eq_values), step):
+                    if eq_max == eq_min:
+                        val = chart_height // 2
+                    else:
+                        val = int((eq_values[i] - eq_min) / (eq_max - eq_min) * chart_height)
+                    line += "#" if val >= row else " "
+                pdf.cell(0, 4, line, ln=True)
+
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(0, 5, f"Min: ${eq_min:,.0f}    Max: ${eq_max:,.0f}", ln=True)
+
+        pdf.ln(6)
+
+        # Trade summary
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Trade List", ln=True)
+        pdf.ln(2)
+
+        if not trades.empty:
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(32, 6, "Entry", border=1)
+            pdf.cell(32, 6, "Exit", border=1)
+            pdf.cell(14, 6, "Side", border=1)
+            pdf.cell(22, 6, "Entry $", border=1)
+            pdf.cell(22, 6, "Exit $", border=1)
+            pdf.cell(22, 6, "PnL", border=1)
+            pdf.cell(22, 6, "PnL %", border=1)
+            pdf.ln()
+
+            pdf.set_font("Helvetica", "", 8)
+            for _, t in trades.iterrows():
+                entry_str = str(t.get('entry_time', ''))[:10]
+                exit_str = str(t.get('exit_time', ''))[:10]
+                pdf.cell(32, 5, entry_str, border=1)
+                pdf.cell(32, 5, exit_str, border=1)
+                pdf.cell(14, 5, str(t.get('side', '')), border=1)
+                pdf.cell(22, 5, f"{t.get('entry_price', 0):.2f}", border=1)
+                pdf.cell(22, 5, f"{t.get('exit_price', 0):.2f}", border=1)
+                pdf.cell(22, 5, f"{t.get('pnl', 0):.2f}", border=1)
+                pdf.cell(22, 5, f"{t.get('pnl_pct', 0):.2f}%", border=1)
+                pdf.ln()
+
+        pdf_content = pdf.output()
+        date_str = datetime.now().strftime("%Y%m%d")
+        filename = f"backtest_{request.symbol}_{request.strategy}_{date_str}.pdf"
+        return pdf_content, filename
+
+    pdf_content, filename = await asyncio.to_thread(_generate_pdf)
 
     return StreamingResponse(
         io.BytesIO(pdf_content),
@@ -962,19 +1071,30 @@ async def get_current_mode():
 async def set_mode(request: ModeRequest):
     """Switch trading mode between paper and live."""
     if request.mode == "live":
-        binance_cfg = get_binance_config()
-        api_key = binance_cfg.get("api_key", "")
-        api_secret = binance_cfg.get("api_secret", "")
-        if not api_key or not api_secret:
-            raise HTTPException(400, "Live mode requires Binance API keys configured in config.yaml")
+        ex_id = get_exchange_id()
+        if ex_id == 'okx':
+            cfg = get_okx_config()
+            api_key = cfg.get("api_key", "")
+            api_secret = cfg.get("api_secret", "")
+            password = cfg.get("password", "")
+            if not api_key or not api_secret or not password:
+                raise HTTPException(400, "实盘模式需要配置 OKX API Key / Secret / 密码")
+        else:
+            cfg = get_binance_config()
+            api_key = cfg.get("api_key", "")
+            api_secret = cfg.get("api_secret", "")
+            if not api_key or not api_secret:
+                raise HTTPException(400, "实盘模式需要配置 Binance API Key / Secret")
+
         # Verify connection
         client = _get_live_client()
         if client is None:
-            raise HTTPException(400, "Cannot initialize Binance client — check API keys")
+            raise HTTPException(400, f"无法初始化 {ex_id.upper()} 客户端 — 请检查 API Key 配置")
         try:
-            client.is_connected()
+            if not client.is_connected():
+                raise HTTPException(400, f"{ex_id.upper()} 连接测试失败 — 请检查 API Key 和网络")
         except Exception as e:
-            raise HTTPException(400, f"Binance connection test failed: {e}")
+            raise HTTPException(400, f"{ex_id.upper()} 连接测试失败: {e}")
 
     # Update config in memory (persisted to config.yaml)
     config = get_config()
@@ -1102,7 +1222,6 @@ async def quick_start():
         bot_id = f"quick_{symbol}_{interval}"
         active_bots[bot_id] = trader
 
-        import asyncio
         asyncio.create_task(trader.start())
 
         return {
@@ -1220,10 +1339,11 @@ async def ws_market(websocket: WebSocket):
             # Keep connection alive, client sends pings
             data = await websocket.receive_text()
             if data == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
+                await websocket.send_text(_json_module.dumps({"type": "pong"}))
     except WebSocketDisconnect:
-        pass
-    except Exception:
+        pass  # Client disconnected, expected behavior
+    except Exception as e:
+        logger.warning(f"WebSocket market error: {e}")
         pass
     finally:
         ws_manager.disconnect(websocket, "market")
@@ -1237,10 +1357,11 @@ async def ws_account(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             if data == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
+                await websocket.send_text(_json_module.dumps({"type": "pong"}))
     except WebSocketDisconnect:
-        pass
-    except Exception:
+        pass  # Client disconnected, expected behavior
+    except Exception as e:
+        logger.warning(f"WebSocket account error: {e}")
         pass
     finally:
         ws_manager.disconnect(websocket, "account")

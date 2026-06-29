@@ -20,6 +20,9 @@ from typing import Dict, List
 import numpy as np
 from .base import Strategy, Signal, SignalType
 
+# --- Module-level constants ---
+_CONFIRMED_EXIT_HISTOGRAM_BARS = 3
+
 
 class MACDStrategy(Strategy):
     """MACD Trend Confirmation Filter.
@@ -166,7 +169,7 @@ class MACDStrategy(Strategy):
         # Level 4 (FORCED): MACD crosses zero → trend exhausted, must exit
         if pos == 1:
             signal_cross = macd[i-1] >= signal[i-1] and macd[i] < signal[i]
-            hist_contracting_3 = self._histogram_contracting(hist, i, bars=3)
+            hist_contracting_3 = self._histogram_contracting(hist, i, bars=_CONFIRMED_EXIT_HISTOGRAM_BARS)
             zero_cross = self._crosses_zero_below(macd, i)
 
             # Level 4: zero cross = forced exit (no questions asked)
@@ -180,7 +183,7 @@ class MACDStrategy(Strategy):
 
         elif pos == -1:
             signal_cross = macd[i-1] <= signal[i-1] and macd[i] > signal[i]
-            hist_contracting_3 = self._histogram_contracting(hist, i, bars=3)
+            hist_contracting_3 = self._histogram_contracting(hist, i, bars=_CONFIRMED_EXIT_HISTOGRAM_BARS)
             zero_cross = self._crosses_zero_above(macd, i)
 
             if zero_cross:

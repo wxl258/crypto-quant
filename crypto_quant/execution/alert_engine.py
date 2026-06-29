@@ -20,7 +20,8 @@ class AlertEngine:
         if ALERTS_FILE.exists():
             try:
                 return json.loads(ALERTS_FILE.read_text())
-            except:
+            except Exception as e:
+                logger.warning(f"Failed to load alerts file: {e}")
                 return []
         return []
 

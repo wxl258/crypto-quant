@@ -25,7 +25,15 @@ class TestSignal:
     """Tests for Signal dataclass."""
 
     def test_signal_creation(self):
-        s = Signal(SignalType.BUY, "BTCUSDT", 65000.0, 0.1, 61750.0, 71500.0, "test buy")
+        s = Signal(
+            signal_type=SignalType.BUY,
+            symbol="BTCUSDT",
+            price=65000.0,
+            reason="test buy",
+            quantity=0.1,
+            stop_loss=61750.0,
+            take_profit=71500.0,
+        )
         assert s.signal_type == SignalType.BUY
         assert s.symbol == "BTCUSDT"
         assert s.price == 65000.0
@@ -37,7 +45,7 @@ class TestSignal:
     def test_signal_defaults(self):
         s = Signal(SignalType.HOLD, "", 0)
         assert s.signal_type == SignalType.HOLD
-        assert s.quantity == 0.0
+        assert s.quantity is None  # default is None, not 0.0
 
     def test_signal_types(self):
         assert SignalType.BUY.value == "BUY"
@@ -128,6 +136,38 @@ class TestStrategyBase:
         atr = s.atr(df['high'].values, df['low'].values, df['close'].values, 14)
         assert len(atr) == len(df)
         assert atr[-1] > 0
+
+    def test_bollinger_bands_return_order(self):
+        s = self._make_strategy()
+        data = np.array([10.0, 10.5, 10.2, 9.8, 10.1] * 20)
+        mid, upper, lower = s.bollinger_bands(data, period=20)
+        # Verify return order: (mid, upper, lower)
+        for i in range(20 - 1, len(data)):
+            if np.isnan(mid[i]):
+                continue
+            assert mid[i] <= upper[i], f"mid[{i}]={mid[i]} > upper[{i}]={upper[i]}"
+            assert lower[i] <= mid[i], f"lower[{i}]={lower[i]} > mid[{i}]={mid[i]}"
+
+    def test_rsi_nan_initial(self):
+        s = self._make_strategy()
+        data = np.linspace(100, 150, 100)
+        period = 14
+        rsi = s.rsi(data, period)
+        # First (period) values should be NaN
+        for i in range(period):
+            assert np.isnan(rsi[i]), f"rsi[{i}] should be NaN, got {rsi[i]}"
+        # Values after period should not be NaN
+        for i in range(period, len(rsi)):
+            assert not np.isnan(rsi[i]), f"rsi[{i}] should not be NaN"
+
+    def test_signal_quality_score(self):
+        s = self._make_strategy()
+        df = _make_ohlcv(200)
+        s.set_data(df)
+        # Test at a few indices that score is in [0, 1]
+        for i in [50, 100, 150]:
+            score = s.signal_quality_score(i, 'LONG', df['close'].iloc[i])
+            assert 0.0 <= score <= 1.0, f"signal_quality_score({i})={score} not in [0,1]"
 
 
 class TestStrategyRegistry:

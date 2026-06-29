@@ -1,6 +1,7 @@
 """
 Paper Trading Simulator - Simulated trading for testing strategies
 """
+import random
 import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime
@@ -12,6 +13,9 @@ from config import get_backtest_config, get_db_path
 from data.store import DataStore
 
 logger = logging.getLogger(__name__)
+
+_MAX_ORDER_HISTORY = 10000
+_MAX_EQUITY_HISTORY = 5000
 
 
 class PaperTradingSimulator:
@@ -29,6 +33,10 @@ class PaperTradingSimulator:
         self.order_history: List[Dict] = []
         self.equity_history: List[Dict] = []
         self._current_price: Dict[str, float] = {}
+
+        # Track exchange-native stop/take-profit order IDs per symbol
+        self._stop_order_ids: Dict[str, str] = {}
+        self._tp_order_ids: Dict[str, str] = {}
 
         # Persistence layer
         self._store = DataStore(get_db_path())
@@ -54,6 +62,7 @@ class PaperTradingSimulator:
                 'timestamp': timestamp,
                 'equity': equity,
             })
+            self._trim_equity_history()
     
     def get_price(self, symbol: str) -> float:
         """Get current price for symbol"""
@@ -70,73 +79,120 @@ class PaperTradingSimulator:
         if not allowed:
             logger.warning(f"Cannot open {side} {symbol}: {reason}")
             return None
-        
+
+        # Apply slippage (±0.05% random)
+        slippage = price * random.uniform(-0.0005, 0.0005)
+        executed_price = price + slippage
+
         quantity = self.risk_manager.calculate_position_size(
-            symbol, price, leverage, atr
+            symbol, executed_price, leverage, atr
         )
-        
-        # Calculate cost
-        position_value = quantity * price / leverage
-        fee = position_value * get_backtest_config().get('commission', 0.0004)
-        
+
+        # Calculate cost: position_value = margin, fee is extra
+        position_value = quantity * executed_price / leverage
+        commission_rate = get_backtest_config().get('commission', 0.0004)
+        fee = position_value * commission_rate
+
+        # Check: margin + fee must be <= capital
         if position_value + fee > self.capital:
-            logger.warning(f"Insufficient capital for {symbol}")
+            logger.warning(f"Insufficient capital for {symbol}: need {position_value + fee:.2f}, have {self.capital:.2f}")
             return None
-        
-        self.capital -= fee
-        
-        self.risk_manager.open_position(symbol, side, price, quantity, leverage, atr)
-        
+
+        # Deduct margin + fee from capital
+        self.capital -= (position_value + fee)
+
+        self.risk_manager.open_position(symbol, side, executed_price, quantity, leverage, atr)
+
         pos_id = str(uuid.uuid4())[:8]
         order = {
             'id': pos_id,
             'symbol': symbol,
             'side': side,
             'type': 'MARKET',
-            'price': price,
+            'price': executed_price,
             'quantity': quantity,
             'leverage': leverage,
+            'position_value': position_value,
             'fee': fee,
             'status': 'FILLED',
             'timestamp': timestamp or datetime.now(),
         }
         self.orders.append(order)
         self.order_history.append(order)
-        
+        self._trim_order_history()
+
         self.positions[symbol] = {
             'symbol': symbol,
             'side': side,
-            'entry_price': price,
+            'entry_price': executed_price,
             'quantity': quantity,
             'leverage': leverage,
+            'position_value': position_value,
             'open_time': timestamp or datetime.now(),
         }
-        
+
+        # Submit exchange-native stop-loss and take-profit orders
+        # (only effective when using a real exchange client via strategy layer;
+        #  in paper mode these are tracked but the risk manager handles triggers locally.)
+        pos_info = self.risk_manager.positions.get(symbol)
+        if pos_info is not None:
+            stop_loss = getattr(pos_info, 'stop_loss', 0.0)
+            take_profit = getattr(pos_info, 'take_profit', 0.0)
+            close_side = 'sell' if side.upper() == 'LONG' else 'buy'
+            if stop_loss > 0:
+                self._stop_order_ids[symbol] = f"sl_{symbol}_{pos_id}"
+                logger.debug(
+                    "SL order would be placed: %s %s qty=%s stop=%.2f",
+                    symbol, close_side, quantity, stop_loss,
+                )
+            if take_profit > 0:
+                self._tp_order_ids[symbol] = f"tp_{symbol}_{pos_id}"
+                logger.debug(
+                    "TP order would be placed: %s %s qty=%s tp=%.2f",
+                    symbol, close_side, quantity, take_profit,
+                )
+
         # Persist to database
         self._store.save_trade({
-            'id': pos_id,
             'symbol': symbol,
             'side': side,
-            'entry_price': price,
+            'entry_price': executed_price,
             'quantity': quantity,
             'leverage': leverage,
             'fee': fee,
-            'status': 'OPEN',
-            'open_time': str(timestamp or datetime.now()),
+            'status': 'open',
+            'entry_time': str(timestamp or datetime.now()),
+            'reason': '',
         })
-        
-        logger.info(f"PAPER: Opened {side} {symbol} x{quantity} @ {price}")
+
+        logger.info(f"PAPER: Opened {side} {symbol} x{quantity} @ {executed_price:.2f} (margin={position_value:.2f}, fee={fee:.4f})")
         return order
     
     def close_position(self, symbol: str, price: float, 
                        reason: str = "", timestamp: datetime = None) -> Optional[Dict]:
-        """Close a simulated position"""
+        """Close a simulated position."""
         if symbol not in self.positions:
             return None
         
         pos = self.positions[symbol]
-        pnl = self.risk_manager.close_position(symbol, price)
-        
+
+        # Apply slippage to exit price
+        slippage = price * random.uniform(-0.0005, 0.0005)
+        exit_price = price + slippage
+
+        # Calculate PnL through risk manager
+        pnl = self.risk_manager.close_position(symbol, exit_price)
+
+        # Calculate close fee
+        position_value = pos.get('position_value', pos['quantity'] * pos['entry_price'] / pos['leverage'])
+        commission_rate = get_backtest_config().get('commission', 0.0004)
+        close_fee = position_value * commission_rate
+
+        if pnl is not None:
+            pnl -= close_fee
+
+        # Release margin + PnL back to capital
+        self.capital += position_value
         if pnl is not None:
             self.capital += pnl
         
@@ -145,23 +201,27 @@ class PaperTradingSimulator:
             'symbol': symbol,
             'side': 'CLOSE',
             'type': 'MARKET',
-            'price': price,
+            'price': exit_price,
             'quantity': pos['quantity'],
             'entry_price': pos['entry_price'],
             'pnl': round(pnl, 2) if pnl else 0,
+            'fee': round(close_fee, 4),
             'reason': reason,
             'status': 'FILLED',
             'timestamp': timestamp or datetime.now(),
         }
         self.order_history.append(order)
+        self._trim_order_history()
         
-        # Update original trade in DB
-        # Find the open trade for this symbol
+        # Cancel associated stop-loss and take-profit orders
+        self._cancel_sl_tp_orders(symbol)
+
+        # Update in DB
         open_trades = self._store.load_open_positions()
         for t in open_trades:
-            if t['symbol'] == symbol and t['status'] == 'OPEN':
+            if t.get('symbol') == symbol and t.get('status') == 'open':
                 self._store.close_trade_in_db(
-                    t['id'], price,
+                    t['id'], exit_price,
                     round(pnl, 2) if pnl else 0,
                     str(timestamp or datetime.now()),
                     reason,
@@ -169,12 +229,35 @@ class PaperTradingSimulator:
                 break
         
         del self.positions[symbol]
-        if pnl is not None:
-            logger.info(f"PAPER: Closed {symbol} @ {price}, PnL={pnl:.2f}")
-        else:
-            logger.info(f"PAPER: Closed {symbol} @ {price}, PnL={pnl}")
+        logger.info(f"PAPER: Closed {symbol} @ {exit_price:.2f}, PnL={pnl:.2f}" if pnl else f"PAPER: Closed {symbol} @ {exit_price:.2f}")
         return order
-    
+
+    # ── Memory management ─────────────────────────────────────────────────
+
+    def _trim_order_history(self):
+        """Trim order_history when it exceeds _MAX_ORDER_HISTORY entries."""
+        if len(self.order_history) > _MAX_ORDER_HISTORY:
+            self.order_history = self.order_history[-5000:]
+
+    def _trim_equity_history(self):
+        """Trim equity_history when it exceeds _MAX_EQUITY_HISTORY entries.
+
+        Downsamples by keeping every 10th entry and retaining the last 1000 entries.
+        """
+        if len(self.equity_history) > _MAX_EQUITY_HISTORY:
+            self.equity_history = self.equity_history[::10][-1000:]
+
+    def _cancel_sl_tp_orders(self, symbol: str):
+        """Cancel tracked stop-loss and take-profit orders for a symbol."""
+        sl_id = self._stop_order_ids.pop(symbol, None)
+        tp_id = self._tp_order_ids.pop(symbol, None)
+        if sl_id:
+            logger.debug("Cancelling SL order %s for %s", sl_id, symbol)
+        if tp_id:
+            logger.debug("Cancelling TP order %s for %s", tp_id, symbol)
+
+    # ── Account ──────────────────────────────────────────────────────────
+
     def get_total_equity(self) -> float:
         """Calculate total equity including unrealized PnL"""
         unrealized = 0
@@ -224,33 +307,35 @@ class PaperTradingSimulator:
         return df
     
     def _restore_state(self):
-        """Restore open positions from database on startup."""
+        """Restore open positions and capital from database on startup."""
         try:
             open_trades = self._store.load_open_positions()
             for t in open_trades:
                 symbol = t['symbol']
+                position_value = t['quantity'] * t['entry_price'] / t.get('leverage', 3)
+                fee = t.get('fee', 0)
+
                 self.positions[symbol] = {
                     'symbol': symbol,
                     'side': t['side'],
                     'entry_price': t['entry_price'],
                     'quantity': t['quantity'],
                     'leverage': t.get('leverage', 3),
-                    'open_time': t.get('open_time', ''),
+                    'position_value': position_value,
+                    'open_time': t.get('entry_time', ''),
                 }
-                # Deduct only fee (matching open_position behavior)
-                position_value = t['quantity'] * t['entry_price'] / t.get('leverage', 3)
-                fee = position_value * get_backtest_config().get('commission', 0.0004)
-                self.capital -= fee
+                # Deduct margin + fee (matching open_position)
+                self.capital -= (position_value + fee)
                 self.risk_manager.open_position(
                     symbol, t['side'], t['entry_price'],
                     t['quantity'], t.get('leverage', 3),
                 )
                 logger.info(f"Restored position: {t['side']} {symbol} x{t['quantity']} @ {t['entry_price']}")
-            
-            # Also restore closed trade history
+
+            # Restore closed PnL from trade history
             history = self._store.load_trade_history(limit=200)
             for t in history:
-                if t.get('status') == 'CLOSED':
+                if t.get('status') == 'closed':
                     self.order_history.append({
                         'id': t['id'],
                         'symbol': t['symbol'],
@@ -261,8 +346,13 @@ class PaperTradingSimulator:
                         'pnl': t.get('pnl', 0),
                         'reason': t.get('reason', ''),
                         'status': 'FILLED',
-                        'timestamp': t.get('close_time', ''),
+                        'timestamp': t.get('exit_time', ''),
                     })
+                    # Add realized PnL to capital
+                    self.capital += t.get('pnl', 0)
+                    # Release margin
+                    pos_val = t['quantity'] * t['entry_price'] / t.get('leverage', 3)
+                    self.capital += pos_val
         except Exception as e:
             logger.warning(f"Failed to restore state from DB: {e}")
     
